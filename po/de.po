@@ -68,7 +68,7 @@ msgid "log"
 msgstr "logarithmisch"
 
 msgid "log-height:"
-msgstr "log Höhe:"
+msgstr "log-Höhe:"
 
 msgid "max:"
 msgstr ""
@@ -84,7 +84,7 @@ msgid "size:"
 msgstr "Größe:"
 
 msgid "top:"
-msgstr "Oben:"
+msgstr "oben:"
 
 msgid "value:"
 msgstr "Wert:"
@@ -149,7 +149,7 @@ msgid "Redo typing"
 msgstr "Wiederholen: Eingabe"
 
 msgid "no Pd settings to clear"
-msgstr "Keine Pd Einstellungen zum Zurücksetzen"
+msgstr "Keine Pd-Einstellungen zum Zurücksetzen"
 
 msgid "removed .pdsettings file"
 msgstr "Datei \".pdsettings\" entfernt"
@@ -158,17 +158,17 @@ msgid "couldn't delete .pdsettings file"
 msgstr "die Datei \".pdsettings\" konnte nicht gelöscht werden"
 
 msgid "failed to erase Pd settings"
-msgstr "Löschen der Pd Einstellungen schlug fehl"
+msgstr "Löschen der Pd-Einstellungen schlug fehl"
 
 msgid "erased Pd settings"
 msgstr "gelöschte Einstellungen"
 
 msgid "no Pd settings to erase"
-msgstr "keine Pd Einstellungen zum Löschen"
+msgstr "keine Pd-Einstellungen zum Löschen"
 
 msgid "skipping loading preferences... Pd seems to have crashed on startup."
 msgstr ""
-"überspringe das Laden der Einstellungen...Pd ist scheinbar beim letzten "
+"überspringe das Laden der Einstellungen... Pd ist scheinbar beim letzten "
 "Start abgestürzt."
 
 msgid "(re-save preferences to reinstate them)"
@@ -205,7 +205,7 @@ msgid "Paste"
 msgstr "Einfügen"
 
 msgid "Array Properties"
-msgstr "Array Eigenschaften"
+msgstr "Array-Eigenschaften"
 
 msgid "Array"
 msgstr "Array"
@@ -238,7 +238,7 @@ msgid "New graph"
 msgstr "neuer Graph"
 
 msgid "Last graph"
-msgstr "letztes Feld"
+msgstr "letzter Graph"
 
 msgid "Options"
 msgstr "Optionen"
@@ -271,7 +271,7 @@ msgid "Delay (msec):"
 msgstr "Verzögerung (msec):"
 
 msgid "Block size:"
-msgstr "Bocklänge:"
+msgstr "Blocklänge:"
 
 msgid "Use callbacks"
 msgstr "Callbacks"
@@ -296,34 +296,34 @@ msgstr "Alle Einstellungen speichern"
 
 msgid "WARNING: unknown graphme flags received in pdtk_canvas_dialog"
 msgstr ""
-"WARNUNG: pdtk_canvas_dialog hat unbekannte graphme-Einstellungen detektiert"
+"WARNUNG: pdtk_canvas_dialog hat unbekannte graphme-Einstellungen erkannt"
 
 msgid "Canvas Properties"
-msgstr "Canvas Eigenschaften"
+msgstr "Canvas-Eigenschaften"
 
 msgid "Scale"
 msgstr "Skalierung"
 
 msgid "X units per pixel:"
-msgstr "X Einheiten pro Pixel:"
+msgstr "X-Einheiten pro Pixel:"
 
 msgid "Y units per pixel:"
-msgstr "Y Einheiten pro Pixel:"
+msgstr "Y-Einheiten pro Pixel:"
 
 msgid "Appearance on parent patch"
-msgstr "Erscheinen auf dem übergeordneten Patch"
+msgstr "Anzeige auf dem übergeordneten Patch"
 
 msgid "Graph-On-Parent"
-msgstr "Graph on Parent"
+msgstr "Graph-On-Parent"
 
 msgid "Hide object name and arguments"
 msgstr "Objektname und Argumente verbergen"
 
 msgid "Range and size"
-msgstr "Spanne und Größe"
+msgstr "Wertebereich und Größe"
 
 msgid "X range: from"
-msgstr "X-Spanne, von"
+msgstr "X-Bereich, von"
 
 msgid "to"
 msgstr "bis"
@@ -332,10 +332,10 @@ msgid "Margin:"
 msgstr "Abstand:"
 
 msgid "Y range: from"
-msgstr "Y-Spanne, von"
+msgstr "Y-Bereich, von"
 
 msgid "Data Properties"
-msgstr "Canvas  Eigenschaften"
+msgstr "Canvas-Eigenschaften"
 
 #, tcl-format
 msgid "Found '%1$s' in %2$s"
@@ -358,7 +358,7 @@ msgid "Showing '%1$d' out of %2$d items in %3$s"
 msgstr "Zeige %1$d von %2$d Ergebnissen für %3$s"
 
 msgid "Pd window"
-msgstr "Pd Fenster"
+msgstr "Pd-Fenster"
 
 msgid "Match whole word only"
 msgstr "Ganzes Wort abgleichen"
@@ -389,7 +389,7 @@ msgid "Y only"
 msgstr "nur Y"
 
 msgid "Atom Box Properties"
-msgstr "Atom Box Eigenschaften"
+msgstr "Atom-Box-Eigenschaften"
 
 msgid "Width:"
 msgstr "Breite:"
@@ -464,7 +464,7 @@ msgid "Toggle"
 msgstr "Schalter"
 
 msgid "Non Zero Value"
-msgstr "Nicht-Null Wert"
+msgstr "Nicht-Null-Wert"
 
 msgid "Value:"
 msgstr "Wert:"
@@ -473,7 +473,7 @@ msgid "Number2"
 msgstr "Number2"
 
 msgid "Width (digits):"
-msgstr "Breite (Stellen)"
+msgstr "Breite (Ziffern)"
 
 # iemgui
 msgid "Height:"
@@ -483,7 +483,7 @@ msgid "Output Range"
 msgstr "Ausgabebereich"
 
 msgid "Log height:"
-msgstr ""
+msgstr "Log-Höhe"
 
 msgid "Vslider"
 msgstr "Vslider"
@@ -501,7 +501,7 @@ msgid "Hradio"
 msgstr "Hradio"
 
 msgid "VU Meter"
-msgstr "VU Meter"
+msgstr "VU-Meter"
 
 msgid "Canvas"
 msgstr "Canvas"
@@ -538,16 +538,16 @@ msgid "Test label"
 msgstr "Test Beschriftung"
 
 msgid "Send a Pd message"
-msgstr "Pd Message senden..."
+msgstr "Pd-Message senden..."
 
 msgid "(use arrow keys for history)"
 msgstr "(benutzen Sie die Pfeiltasten zum Blättern)"
 
 msgid "MIDI Settings"
-msgstr "MIDI Einstellungen"
+msgstr "MIDI-Einstellungen"
 
 msgid "ALSA MIDI Settings"
-msgstr "ALSA MIDI Einstellungen"
+msgstr "ALSA MIDI-Einstellungen"
 
 msgid "In Ports:"
 msgstr "Eingänge:"
@@ -581,9 +581,8 @@ msgstr "Deaktivieren"
 msgid "Externals Install Directory"
 msgstr "Installationsverzeichnis für Bibliotheken"
 
-#, fuzzy
 msgid "Clear"
-msgstr "Menü löschen"
+msgstr "Eintrag löschen"
 
 msgid "Choose Pd documents directory:"
 msgstr "Wählen Sie ein Verzeichnis für Pd-Dokumente:"
@@ -667,15 +666,15 @@ msgstr "Deinstallation von '%1$s' aus %2$s schlug fehl!"
 
 #, tcl-format
 msgid "[deken] deken-plugin.tcl (Pd externals search) loaded from %s."
-msgstr "[deken] Pd Paketmanager vom Pfad %s geladen."
+msgstr "[deken] Pd-Paketmanager vom Pfad %s geladen."
 
 #, tcl-format
 msgid "[deken] Platform detected: %s"
 msgstr "[deken] Plattform gefunden: %s"
 
-#, fuzzy, tcl-format
+#, tcl-format
 msgid "[deken] Platform re-detected: %s"
-msgstr "[deken] Plattform gefunden: %s"
+msgstr "[deken] Plattform (wieder)gefunden: %s"
 
 msgid "Show all"
 msgstr "Alle anzeigen"
@@ -693,7 +692,7 @@ msgstr "Finde Externals online"
 
 msgid "Only install externals uploaded by people you trust."
 msgstr ""
-"Installieren Sie nur Externals deren Entwickler und Entwicklerinnen Sie "
+"Installieren Sie nur Externals, deren Entwickler und Entwicklerinnen Sie "
 "vertrauen."
 
 msgid "Preferences"
@@ -713,7 +712,7 @@ msgstr ""
 
 msgid "Should newly installed libraries be added to Pd's search path?"
 msgstr ""
-"Sollen neu installierte Bibliotheken zu Pds Suchpfad hinzugefügt werden?"
+"Sollen neu installierte Bibliotheken zum Pd-Suchpfad hinzugefügt werden?"
 
 msgid "Platform settings:"
 msgstr "Architektureinstellungen:"
@@ -773,11 +772,11 @@ msgstr "Abbruch.\n"
 
 #, tcl-format
 msgid "Unable to add %s to search paths"
-msgstr "Konnte %s nicht zu Pds Suchpfad hinzufügen"
+msgstr "Konnte %s nicht zu Pd-Suchpfad hinzufügen"
 
 #, tcl-format
 msgid "Add %s to the Pd search paths?"
-msgstr "Soll %s zu Pds Suchpfad hinzugefügt werden?"
+msgstr "Soll %s zu Pd-Suchpfad hinzugefügt werden?"
 
 #, tcl-format
 msgid "Added %s to search paths"
@@ -957,7 +956,7 @@ msgid "Audio Settings..."
 msgstr "Audioeinstellungen..."
 
 msgid "MIDI Settings..."
-msgstr "MIDI Einstellungen..."
+msgstr "MIDI-Einstellungen..."
 
 msgid "Minimize"
 msgstr "Minimieren"
@@ -978,10 +977,10 @@ msgid "Parent Window"
 msgstr "Übergeordnetes Fenster"
 
 msgid "HTML Manual..."
-msgstr "HTML Anleitung..."
+msgstr "HTML-Anleitung..."
 
 msgid "Browser..."
-msgstr "Patch Browser..."
+msgstr "Patch-Browser..."
 
 msgid "puredata.info"
 msgstr ""
@@ -1009,7 +1008,7 @@ msgid "Audio..."
 msgstr "Audioeinstellungen..."
 
 msgid "MIDI..."
-msgstr "MIDI Einstellungen..."
+msgstr "MIDI-Einstellungen..."
 
 msgid "Zoom New Windows"
 msgstr "Neue Fenster vergrößern"
@@ -1023,7 +1022,6 @@ msgstr "Speichern als..."
 msgid "Load from..."
 msgstr "Laden von..."
 
-#, fuzzy
 msgid "Forget All..."
 msgstr "Zurücksetzen..."
 
@@ -1055,13 +1053,13 @@ msgid "DSP"
 msgstr ""
 
 msgid "Audio I/O error"
-msgstr "Audio E/A-Fehler"
+msgstr "Audio-I/O-Fehler"
 
 msgid "Log:"
 msgstr ""
 
 msgid "fatal"
-msgstr "schwerwiegende Fehler"
+msgstr "schwerwiegender Fehler"
 
 msgid "error"
 msgstr "Fehler"
@@ -1099,19 +1097,19 @@ msgstr "Überspringe '%s': kein Pd-File"
 #~ msgstr "für:"
 
 #~ msgid "Max Text Files"
-#~ msgstr "Max Textdateien"
+#~ msgstr "Max-Textdateien"
 
 #~ msgid "Pd Files"
-#~ msgstr "Pd Dateien"
+#~ msgstr "Pd-Dateien"
 
 #~ msgid "Max Patch Files"
-#~ msgstr "Max Patch Dateien"
+#~ msgstr "Max-Patch-Dateien"
 
 #~ msgid "really quit?"
 #~ msgstr "Wirklich Abbrechen?"
 
 #~ msgid "Use multiple ALSA devices"
-#~ msgstr "Mehrere ALSA Geräte verwenden"
+#~ msgstr "Mehrere ALSA-Geräte verwenden"
 
 #~ msgid "Input device 2:"
 #~ msgstr "Eingabegerät 2:"
@@ -1187,4 +1185,4 @@ msgstr "Überspringe '%s': kein Pd-File"
 #~ msgstr "Filter"
 
 #~ msgid "Max Patch Files (.pat)"
-#~ msgstr "Max Patch Dateien (.pat)"
+#~ msgstr "Max-Patch-Dateien (.pat)"
