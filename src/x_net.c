@@ -59,6 +59,7 @@ static void netreceive_notify(t_netreceive *x, int fd);
 
 static void *netsend_new(t_symbol *s, int argc, t_atom *argv)
 {
+    int noreceive = 0;
     t_netsend *x = (t_netsend *)pd_new(netsend_class);
     outlet_new(&x->x_obj, &s_float);
     x->x_protocol = SOCK_STREAM;
@@ -75,6 +76,8 @@ static void *netsend_new(t_symbol *s, int argc, t_atom *argv)
             x->x_bin = 1;
         else if (!strcmp(argv->a_w.w_symbol->s_name, "-u"))
             x->x_protocol = SOCK_DGRAM;
+        else if (!strcmp(argv->a_w.w_symbol->s_name, "-n"))
+            noreceive = 1;
         else
         {
             pd_error(x, "netsend: unknown flag ...");
@@ -89,7 +92,7 @@ static void *netsend_new(t_symbol *s, int argc, t_atom *argv)
     }
     x->x_sockfd = -1;
     x->x_receiver = NULL;
-    x->x_msgout = outlet_new(&x->x_obj, &s_anything);
+    if (!noreceive) x->x_msgout = outlet_new(&x->x_obj, &s_anything);
     return (x);
 }
 
@@ -277,7 +280,7 @@ static void netsend_disconnect(t_netsend *x)
 {
     if (x->x_sockfd >= 0)
     {
-        sys_rmpollfn(x->x_sockfd);
+        if (x->x_msgout) sys_rmpollfn(x->x_sockfd);
         sys_closesocket(x->x_sockfd);
         x->x_sockfd = -1;
         if(x->x_receiver)
