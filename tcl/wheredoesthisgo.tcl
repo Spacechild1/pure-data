@@ -39,6 +39,9 @@ proc pdtk_openpanel {target localdir} {
     if {$filename ne ""} {
         set ::fileopendir [file dirname $filename]
         pdsend "$target callback [enquote_path $filename]"
+    } else {
+        # cancel -> empty callback
+        pdsend "$target callback"
     }
 }
 
@@ -52,6 +55,9 @@ proc pdtk_savepanel {target localdir} {
     set filename [tk_getSaveFile -initialdir $localdir]
     if {$filename ne ""} {
         pdsend "$target callback [enquote_path $filename]"
+    } else {
+        # cancel -> empty callback
+        pdsend "$target callback"
     }
 }
 
