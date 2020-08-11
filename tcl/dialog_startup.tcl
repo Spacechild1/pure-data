@@ -101,12 +101,10 @@ proc ::dialog_startup::create_dialog {mytoplevel} {
     pack $mytoplevel.optionframe -side top -anchor s -fill x -padx 20 -pady 5
 
     # defeatrt
-    if {$::windowingsystem ne "win32"} {
-        checkbutton $mytoplevel.optionframe.defeatrt -anchor w \
-            -text [_ "Defeat real-time scheduling"] \
-            -variable ::dialog_startup::defeatrt_button
-        pack $mytoplevel.optionframe.defeatrt -anchor w
-    }
+    checkbutton $mytoplevel.optionframe.defeatrt -anchor w \
+        -text [_ "Defeat real-time scheduling"] \
+        -variable ::dialog_startup::defeatrt_button
+    pack $mytoplevel.optionframe.defeatrt -anchor w
 
     # event loop (only OSX for now)
     if {$::windowingsystem eq "aqua"} {
