@@ -618,6 +618,9 @@ msgstr "Kommandozeilenoptionen:"
 msgid "Defeat real-time scheduling"
 msgstr "Echtzeit-Modus unterdrücken"
 
+msgid "Enable event loop"
+msgstr "Event-Loop aktivieren"
+
 msgid "Help Browser"
 msgstr "Hilfebrowser"
 
