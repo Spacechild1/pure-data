@@ -4,8 +4,6 @@ package provide dialog_startup 0.1
 package require scrollboxwindow
 
 namespace eval dialog_startup {
-    variable defeatrt_flag 0
-
     namespace export pdtk_startup_dialog
 }
 
@@ -62,13 +60,16 @@ proc ::dialog_startup::edit { current_library } {
 
 proc ::dialog_startup::commit { new_startup } {
     variable defeatrt_button
+    variable eventloop_button
     set ::startup_libraries $new_startup
-    pdsend "pd startup-dialog $defeatrt_button [pdtk_encodedialog $::startup_flags] [pdtk_encode $::startup_libraries]"
+    pdsend "pd startup-dialog $defeatrt_button $eventloop_button \
+        [pdtk_encodedialog $::startup_flags] [pdtk_encode $::startup_libraries]"
 }
 
 # set up the panel with the info from pd
-proc ::dialog_startup::pdtk_startup_dialog {mytoplevel defeatrt flags} {
+proc ::dialog_startup::pdtk_startup_dialog {mytoplevel defeatrt eventloop flags} {
     variable defeatrt_button $defeatrt
+    variable eventloop_button $eventloop
     if {$flags ne ""} {variable ::startup_flags $flags}
 
     if {[winfo exists $mytoplevel]} {
@@ -95,13 +96,24 @@ proc ::dialog_startup::create_dialog {mytoplevel} {
     pack $mytoplevel.flags.entry -side right -expand 1 -fill x
     pack $mytoplevel.flags.entryname -side right
 
+    # options
+    frame $mytoplevel.optionframe
+    pack $mytoplevel.optionframe -side top -anchor s -fill x -padx 20 -pady 5
+
+    # defeatrt
     if {$::windowingsystem ne "win32"} {
-        frame $mytoplevel.defeatrtframe
-        pack $mytoplevel.defeatrtframe -side top -anchor s -fill x -padx 2m -pady 5
-        checkbutton $mytoplevel.defeatrtframe.defeatrt -anchor w \
+        checkbutton $mytoplevel.optionframe.defeatrt -anchor w \
             -text [_ "Defeat real-time scheduling"] \
             -variable ::dialog_startup::defeatrt_button
-        pack $mytoplevel.defeatrtframe.defeatrt
+        pack $mytoplevel.optionframe.defeatrt -anchor w
+    }
+
+    # event loop (only OSX for now)
+    if {$::windowingsystem eq "aqua"} {
+        checkbutton $mytoplevel.optionframe.eventloop -anchor w \
+            -text [_ "Enable event loop"] \
+            -variable ::dialog_startup::eventloop_button
+        pack $mytoplevel.optionframe.eventloop -anchor w
     }
 
     # focus handling on OSX

@@ -703,8 +703,8 @@ void glob_start_startup_dialog(t_pd *dummy)
     char buf[MAXPDSTRING];
 
     sys_set_startup();
-    sprintf(buf, "pdtk_startup_dialog %%s %d \"%s\"\n", sys_defeatrt,
-        (sys_flags? sys_flags->s_name : ""));
+    sprintf(buf, "pdtk_startup_dialog %%s %d %d \"%s\"\n", sys_defeatrt,
+        sys_eventloop, (sys_flags? sys_flags->s_name : ""));
     gfxstub_new(&glob_pdobject, (void *)glob_start_startup_dialog, buf);
 }
 
@@ -715,10 +715,12 @@ void glob_startup_dialog(t_pd *dummy, t_symbol *s, int argc, t_atom *argv)
     namelist_free(STUFF->st_externlist);
     STUFF->st_externlist = 0;
     sys_defeatrt = atom_getfloatarg(0, argc, argv);
-    sys_flags = sys_decodedialog(atom_getsymbolarg(1, argc, argv));
-    for (i = 0; i < argc-2; i++)
+    sys_eventloop = atom_getfloatarg(1, argc, argv);
+    sys_flags = sys_decodedialog(atom_getsymbolarg(2, argc, argv));
+    argc -= 3; argv += 3;
+    for (i = 0; i < argc; i++)
     {
-        t_symbol *s = sys_decodedialog(atom_getsymbolarg(i+2, argc, argv));
+        t_symbol *s = sys_decodedialog(atom_getsymbol(argv + i));
         if (*s->s_name)
             STUFF->st_externlist =
                 namelist_append_files(STUFF->st_externlist, s->s_name);
