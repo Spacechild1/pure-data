@@ -600,6 +600,9 @@ msgstr ""
 msgid "Defeat real-time scheduling"
 msgstr ""
 
+msgid "Enable event loop"
+msgstr ""
+
 msgid "Help Browser"
 msgstr ""
 
