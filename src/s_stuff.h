@@ -41,6 +41,7 @@ extern int sys_verbose;
 extern int sys_noloadbang;
 EXTERN int sys_havegui(void);
 extern char *sys_guicmd;
+extern int sys_eventloop;
 
 EXTERN int sys_nearestfontsize(int fontsize);
 
@@ -426,3 +427,10 @@ struct _instancestuff
  * 'srclen' can be 0, in which case the 'src' string must be 0-terminated.
  */
 EXTERN char*pdgui_strnescape(char* dst, size_t dstlen, const char*src, size_t srclen);
+
+/* event loop */
+#ifdef PD_EVENTLOOP
+void sys_eventloop_setup(void);
+void sys_eventloop_run(void);
+void sys_eventloop_quit(void);
+#endif
