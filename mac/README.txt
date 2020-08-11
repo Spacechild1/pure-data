@@ -188,3 +188,25 @@ is required due to the new security settings. Note: ad-hoc signing doesn't
 actually sign the .app bundle with an account certificate, so the unidentified
 developer warning is still shown when the downloaded .app is run for the first
 time.
+
+## Cocoa event loop
+
+As of Pd 0.52, you can request a Cocoa event loop with the "-eventloop" flag
+or by checking "Enable event loop" in the "Startup" dialog. This will enable
+externals to run native UIs without disturbing audio processing.
+
+Traditionally, Pd runs the scheduler on the main thread, but Cocoa requires that
+the UI thread must be the main thread, otherwise it won't receive any input events
+(which makes UI interaction impossible). "-eventloop" essentially moves the scheduler
+to a secondary thread and runs a Cocoa event loop on the main thread.
+
+Unfortunately, some externals like 'Gem' or 'ophelia' already run their own (polling)
+event loop and expect the scheduler to run on the main thread. To maintain backwards
+compatibility we can't enable the event loop by default, instead users must request
+it explicitly with the "-eventloop" flag.
+
+For now, the event loop is only implemented for macOS, because there it is essential.
+Win32 and X11, on the other hand, don't have any notion of a "main thread", so externals
+can simply run their own event loop on any thread they like. Later we might add a Windows
+and Linux implementation for consistency and convenience, together with API methods for
+dispatching function calls to the UI thread (similar to "dispatch_async_f" on macOS).
