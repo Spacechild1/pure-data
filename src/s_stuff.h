@@ -75,6 +75,7 @@ EXTERN void sys_set_audio_settings_reopen(int naudioindev, int *audioindev,
     int srate, int advance, int callback, int blocksize);
 EXTERN void sys_reopen_audio(void);
 EXTERN void sys_close_audio(void);
+EXTERN void sys_terminate_audio(void);
     /* return true if the interface prefers always being open (ala jack) : */
 EXTERN int audio_shouldkeepopen(void);
 EXTERN int audio_isopen(void);     /* true if audio interface is open */
@@ -259,6 +260,7 @@ int pa_open_audio(int inchans, int outchans, int rate, t_sample *soundin,
     t_sample *soundout, int framesperbuf, int nbuffers,
     int indeviceno, int outdeviceno, t_audiocallback callback);
 void pa_close_audio(void);
+void pa_terminate(void);
 int pa_send_dacs(void);
 void pa_listdevs(void);
 void pa_getdevs(char *indevlist, int *nindevs,

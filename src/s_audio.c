@@ -420,6 +420,19 @@ void sys_close_audio(void)
     sys_vgui("set pd_whichapi 0\n");
 }
 
+void sys_terminate_audio(void)
+{
+    if (sys_externalschedlib)
+    {
+        return;
+    }
+    if (audio_isopen())
+        sys_close_audio();
+#ifdef USEAPI_PORTAUDIO
+    pa_terminate();
+#endif
+}
+
     /* open audio using whatever parameters were last used */
 void sys_reopen_audio(void)
 {

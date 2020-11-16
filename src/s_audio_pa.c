@@ -97,9 +97,10 @@ static pthread_cond_t pa_sem;
 #endif /* THREADSIGNAL */
 #endif  /* FAKEBLOCKING */
 
+static int initialized;
+
 static void pa_init(void)        /* Initialize PortAudio  */
 {
-    static int initialized;
     if (!initialized)
     {
 #ifdef __APPLE__
@@ -130,6 +131,12 @@ static void pa_init(void)        /* Initialize PortAudio  */
         }
         initialized = 1;
     }
+}
+
+void pa_terminate(void)
+{
+    if (initialized)
+        Pa_Terminate();
 }
 
 static int pa_lowlevel_callback(const void *inputBuffer,

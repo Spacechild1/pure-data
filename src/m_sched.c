@@ -617,6 +617,7 @@ int m_mainloop(void)
             }
         }
     }
+    sys_terminate_audio();
     return (0);
 }
 

@@ -1483,7 +1483,7 @@ void sys_bail(int n)
             /* sys_close_audio() hangs if you're in a signal? */
         fprintf(stderr ,"gui socket %d - \n", pd_this->pd_inter->i_guisock);
         fprintf(stderr, "closing audio...\n");
-        sys_close_audio();
+        sys_terminate_audio();
         fprintf(stderr, "closing MIDI...\n");
         sys_close_midi();
         fprintf(stderr, "... done.\n");
