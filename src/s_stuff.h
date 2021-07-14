@@ -398,6 +398,15 @@ EXTERN void inmidi_polyaftertouch(int portno,
 /* } jsarlo */
 EXTERN int sys_zoom_open;
 
+/* task API. for documentation see s_task.c */
+EXTERN_STRUCT _taskqueue;
+#define t_taskqueue struct _taskqueue
+
+EXTERN void sys_taskqueue_start(struct _pdinstance *pd, int external);
+EXTERN void sys_taskqueue_stop(struct _pdinstance *pd, int external);
+EXTERN int sys_taskqueue_perform(struct _pdinstance *pd, int nonblocking);
+
+
 struct _instancestuff
 {
     t_namelist *st_externlist;
@@ -413,6 +422,8 @@ struct _instancestuff
     t_sample *st_soundout;
     t_sample *st_soundin;
     double st_time_per_dsp_tick;    /* obsolete - included for GEM?? */
+    t_taskqueue *st_taskqueue;
+
 };
 
 #define STUFF (pd_this->pd_stuff)

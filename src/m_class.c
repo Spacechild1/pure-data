@@ -53,6 +53,8 @@ void g_canvas_freepdinstance( void);
 void d_ugen_newpdinstance( void);
 void d_ugen_freepdinstance( void);
 void new_anything(void *dummy, t_symbol *s, int argc, t_atom *argv);
+void s_task_newpdinstance(void);
+void s_task_freepdinstance(void);
 
 void s_stuff_newpdinstance(void)
 {
@@ -60,10 +62,12 @@ void s_stuff_newpdinstance(void)
     STUFF->st_externlist = STUFF->st_searchpath =
         STUFF->st_staticpath = STUFF->st_helppath = STUFF->st_temppath = 0;
     STUFF->st_schedblocksize = STUFF->st_blocksize = DEFDACBLKSIZE;
+    s_task_newpdinstance();
 }
 
 void s_stuff_freepdinstance(void)
 {
+    s_task_freepdinstance();
     freebytes(STUFF, sizeof(*STUFF));
 }
 

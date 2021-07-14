@@ -403,7 +403,9 @@ void sched_set_using_audio(int flag)
     sys_vgui("pdtk_pd_audio %s\n", flag ? "on" : "off");
 }
 
-    /* take the scheduler forward one DSP tick, also handling clock timeouts */
+void taskqueue_poll(void);
+
+    /* take the scheduler forward one DSP tick, also handling clock timeouts and tasks. */
 void sched_tick(void)
 {
     double next_sys_time = pd_this->pd_systime +
@@ -426,6 +428,7 @@ void sched_tick(void)
             return;
     }
     pd_this->pd_systime = next_sys_time;
+    taskqueue_poll();
     dsp_tick();
     sched_diddsp++;
 }
@@ -465,6 +468,7 @@ static void m_pollingscheduler(void)
     else if (sys_sleepgrain > 5000)
         sys_sleepgrain = 5000;
     sys_initmidiqueue();
+    sys_taskqueue_start(pd_this, 0);
     while (!sys_quit)
     {
         int didsomething = 0;
@@ -558,6 +562,7 @@ static void m_pollingscheduler(void)
             sched_didnothing++;
         }
     }
+    sys_taskqueue_stop(pd_this, 0);
     sys_unlock();
 }
 
@@ -580,6 +585,7 @@ void sched_audio_callbackfn(void)
 static void m_callbackscheduler(void)
 {
     sys_initmidiqueue();
+    sys_taskqueue_start(pd_this, 0);
     while (!sys_quit)
     {
         double timewas = pd_this->pd_systime;
@@ -598,6 +604,7 @@ static void m_callbackscheduler(void)
         if (sys_idlehook)
             sys_idlehook();
     }
+    sys_taskqueue_stop(pd_this, 0);
 }
 
 int m_mainloop(void)
