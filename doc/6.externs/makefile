@@ -9,7 +9,7 @@ clean: ; rm -f *.pd_linux *.o
 
 VC="D:\Program Files\Microsoft Visual Studio\Vc98"
 
-pd_nt: obj1.dll obj2.dll obj3.dll obj4.dll obj5.dll dspobj~.dll
+pd_nt: obj1.dll obj2.dll obj3.dll obj4.dll obj5.dll taskobj.dll dspobj~.dll
 
 .SUFFIXES: .obj .dll
 
@@ -35,10 +35,10 @@ dspobj~.dll: dspobj~.c;
 # ----------------------- LINUX i386 -----------------------
 
 pd_linux: obj1.l_ia64 obj2.l_ia64 obj3.l_ia64 obj4.l_ia64 \
-    obj5.l_ia64 dspobj~.l_ia64
+    obj5.l_ia64 taskobj.l_ia64 dspobj~.l_ia64
 
 pd_linux32: obj1.l_i386 obj2.l_i386 obj3.l_i386 obj4.l_i386 \
-    obj5.l_i386 dspobj~.l_i386
+    obj5.l_i386 taskobj.l_i386 dspobj~.l_i386
 
 .SUFFIXES: .l_i386 .l_ia64
 
@@ -62,8 +62,8 @@ LINUXINCLUDE =  -I../../src
 
 # ----------------------- macOS -----------------------
 
-pd_darwin: obj1.pd_darwin obj2.pd_darwin \
-     obj3.pd_darwin obj4.pd_darwin obj5.pd_darwin dspobj~.pd_darwin
+pd_darwin: obj1.pd_darwin obj2.pd_darwin obj3.pd_darwin \
+	obj4.pd_darwin obj5.pd_darwin taskobj.pd_darwin dspobj~.pd_darwin
 
 .SUFFIXES: .pd_darwin
 
