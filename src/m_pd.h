@@ -743,11 +743,45 @@ EXTERN int garray_npoints(t_garray *x);
 EXTERN char *garray_vec(t_garray *x);
 EXTERN void garray_resize(t_garray *x, t_floatarg f);  /* avoid; use this: */
 EXTERN void garray_resize_long(t_garray *x, long n);   /* better version */
-EXTERN void garray_usedindsp(t_garray *x);
+EXTERN void garray_usedindsp(t_garray *x); /* avoid, use arrayref methods instead */
 EXTERN void garray_setsaveit(t_garray *x, int saveit);
 EXTERN t_glist *garray_getglist(t_garray *x);
 EXTERN t_array *garray_getarray(t_garray *x);
 EXTERN t_class *scalar_class;
+
+/* t_arrayref is a safe reference to a graphical array or data structure array.
+ * The actual array data can be obtained on demand by the functions below.
+ * (You must not store any pointers to array data because it might become stale!)
+ * The advantage of using those functions instead of garray_getfloatwords()
+ * is that the array data can change without rebuilding the DSP graph!
+ * They also speed up and simplify garray access in control objects because you
+ * do not have to look up the garray every single time.
+ * Finally, they allow to synchronize array data access in parallel DSP processing.
+ * See d_array.c for examples. */
+typedef t_gpointer t_arrayref;
+
+EXTERN void arrayref_init(t_arrayref *x);
+EXTERN void arrayref_unset(t_arrayref *x);
+/* set arrayref to a new garray */
+EXTERN int arrayref_set(t_arrayref *x, t_symbol *arrayname, t_pd *obj);
+/* check if the garrayref is valid */
+EXTERN int arrayref_check(t_arrayref *x);
+/* for control objects: safely access array data. If the reference is empty or
+ * stale, (re)acquire the array by name; if 'arrayname' is NULL, fail silently.
+ * Returns 1 if it could get the array data; otherwise returns 0.
+ *
+ * If you want to set the arrayref to another array, you must either call
+ * arrayref_set() with the new name, or call arrayref_unset() and lazily initialize
+ * it in the next call to arrayref_get(). */
+EXTERN int arrayref_get(t_arrayref *x, int *size, t_word **vec, t_symbol *arrayname, t_pd *obj);
+/* for DSP objects: acquire and release array in the perform routine.
+ * Returns 1 if it could acquire the array data; otherwise returns 0.
+ * WARNING: do not attempt to release the array if you could not acquire it! */
+EXTERN int arrayref_acquire(t_arrayref *x, int *size, t_word **vec);
+EXTERN void arrayref_release(t_arrayref *x);
+/* variant of arrayref_acquire/arrayref_release for *read-only* access. */
+EXTERN int arrayref_acquire_shared(t_arrayref *x, int *size, t_word **vec);
+EXTERN void arrayref_release_shared(t_arrayref *x);
 
 EXTERN t_float *value_get(t_symbol *s);
 EXTERN void value_release(t_symbol *s);

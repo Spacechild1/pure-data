@@ -43,6 +43,11 @@ in future releases.  The public (stable) API is in m_pd.h. */
 extern "C" {
 #endif
 
+#if PD_DSPTHREADS
+/* for t_array */
+#include "s_spinlock.h"
+#endif
+
 /* --------------------- geometry ---------------------------- */
 #define IOWIDTH 7       /* width of an inlet/outlet in pixels */
 #define IHEIGHT 3       /* height of an inlet in pixels */
@@ -243,6 +248,9 @@ struct _array
     int a_valid;        /* protection against stale pointers into array */
     t_gpointer a_gp;    /* pointer to scalar or array element we're in */
     t_gstub *a_stub;    /* stub for pointing into this array */
+#if PD_DSPTHREADS
+    t_rwspinlock a_lock;
+#endif
 };
 
     /* structure for traversing all the connections in a glist */

@@ -6,6 +6,10 @@
 #include <stdio.h>      /* for read/write to files */
 #include "m_pd.h"
 #include "g_canvas.h"
+#include "s_stuff.h"
+#if PD_DSPTHREADS
+# include "s_spinlock.h"
+#endif
 #include <math.h>
 
 /* jsarlo { */
@@ -34,6 +38,9 @@ t_array *array_new(t_symbol *templatesym, t_gpointer *parent)
     x->a_gp = *parent;
     x->a_stub = gstub_new(0, x);
     word_init((t_word *)(x->a_vec), template, parent);
+#if PD_DSPTHREADS
+    rwspinlock_init(&x->a_lock);
+#endif
     return (x);
 }
 
@@ -753,9 +760,125 @@ const t_widgetbehavior garray_widgetbehavior =
 
 /* ----------------------- public functions -------------------- */
 
+/* legacy, use garrayref methods instead */
 void garray_usedindsp(t_garray *x)
 {
     x->x_usedindsp = 1;
+}
+
+void arrayref_init(t_arrayref *x)
+{
+    gpointer_init(x);
+}
+
+void arrayref_unset(t_arrayref *x)
+{
+    gpointer_unset(x);
+}
+
+static int arrayref_findbyname(t_arrayref *x, t_symbol *name, t_pd *obj)
+{
+    t_garray *g;
+    t_array *a;
+    int npoints;
+    t_word *vec;
+    if (!(g = (t_garray *)pd_findbyclass(name, garray_class)))
+    {
+        if (obj)
+            pd_error(obj, "%s: %s: no such array",
+                     class_getname(*obj), name->s_name);
+        else
+            pd_error(0, "%s: no such array", name->s_name);
+        return 0;
+    }
+    if (!garray_getfloatwords(g, &npoints, &vec))
+    {
+        if (obj)
+            pd_error(obj, "%s: bad template for %s",
+                     name->s_name, class_getname(*obj));
+        else
+            pd_error(0, "%s: bad template", name->s_name);
+        return 0;
+    }
+    if (!(a = garray_getarray(g)))
+        return 0;
+    gpointer_setarray(x, a, vec);
+    return 1;
+}
+
+int arrayref_set(t_arrayref *x, t_symbol *arrayname, t_pd *obj)
+{
+    /* ignore empty symbol */
+    if (!(*arrayname->s_name && arrayref_findbyname(x, arrayname, obj)))
+    {
+        arrayref_unset(x);
+        return 0;
+    }
+    return 1;
+}
+
+int arrayref_check(t_arrayref *x)
+{
+    /* do we have a stub, and if yes, has it been cut off? */
+    return x->gp_stub && (x->gp_stub->gs_which == GP_ARRAY);
+}
+
+    /* lazily initialize an arrayref by name and return the array data;
+     * if 'arrayname' is NULL, just fail silently. */
+int arrayref_get(t_arrayref *x, int *size, t_word **vec,
+    t_symbol *arrayname, t_pd *obj)
+{
+    t_array *a;
+    if (!arrayref_check(x))
+    {
+        if (!arrayname || !arrayref_findbyname(x, arrayname, obj))
+            return 0;
+    }
+    a = x->gp_stub->gs_un.gs_array;
+    *vec = (t_word *)a->a_vec;
+    *size = a->a_n;
+    return 1;
+}
+
+    /* arrayref_acquire() and arrayref_acquire_shared() always fail
+     * silently if arrayref is empty or if the array has been removed.
+     * In practice, adding/removing arrays triggers a DSP graph update,
+     * so we automatically try to reacquire the garray in our DSP method
+     * by calling arrayref_set().
+     * NOTE: we avoid (un)setting the garrayref in the perform routine
+     * because it would make things more complicated wrt thread-safety. */
+int arrayref_acquire(t_arrayref *x, int *size, t_word **vec)
+{
+    if (!arrayref_get(x, size, vec, 0, 0))
+        return 0;
+#if PD_DSPTHREADS
+    rwspinlock_wrlock(&x->gp_stub->gs_un.gs_array->a_lock);
+#endif
+    return 1;
+}
+
+void garrayref_release(t_arrayref *x)
+{
+#if PD_DSPTHREADS
+    rwspinlock_wrunlock(&x->gp_stub->gs_un.gs_array->a_lock);
+#endif
+}
+
+int garrayref_acquire_shared(t_arrayref *x, int *size, t_word **vec)
+{
+    if (!arrayref_get(x, size, vec, 0, 0))
+        return 0;
+#if PD_DSPTHREADS
+    rwspinlock_rdlock(&x->gp_stub->gs_un.gs_array->a_lock);
+#endif
+    return 1;
+}
+
+void garrayref_release_shared(t_arrayref *x)
+{
+#if PD_DSPTHREADS
+    rwspinlock_rdunlock(&x->gp_stub->gs_un.gs_array->a_lock);
+#endif
 }
 
 static void garray_doredraw(t_gobj *client, t_glist *glist)
