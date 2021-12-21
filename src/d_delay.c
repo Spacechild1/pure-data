@@ -5,7 +5,22 @@
 /*  send~, delread~, throw~, catch~ */
 
 #include "m_pd.h"
+#include "s_stuff.h"
 #include <string.h>
+
+#if PD_DSPTHREADS
+# include "s_spinlock.h"
+# define LOCK(x) rwspinlock_wrlock((t_rwspinlock *)&x)
+# define UNLOCK(x) rwspinlock_wrunlock((t_rwspinlock *)&x)
+# define LOCK_SHARED(x) rwspinlock_rdlock((t_rwspinlock *)&x)
+# define UNLOCK_SHARED(x) rwspinlock_rdunlock((t_rwspinlock *)&x)
+#else
+# define LOCK(x)
+# define UNLOCK(x)
+# define LOCK_SHARED(x)
+# define UNLOCK_SHARED(x)
+#endif
+
 extern int ugen_getsortno(void);
 
 #define DEFDELVS 64             /* LATER get this from canvas at DSP time */
@@ -16,9 +31,12 @@ static t_class *sigdelwrite_class;
 
 typedef struct delwritectl
 {
-    int c_n;
     t_sample *c_vec;
+    int c_n;
     int c_phase;
+#if PD_DSPTHREADS
+    t_spinlock c_lock;
+#endif
 } t_delwritectl;
 
 typedef struct _sigdelwrite
@@ -86,6 +104,9 @@ static void *sigdelwrite_new(t_symbol *s, t_floatarg msec)
     x->x_deltime = msec;
     x->x_cspace.c_n = 0;
     x->x_cspace.c_vec = getbytes(XTRASAMPS * sizeof(t_sample));
+#if PD_DSPTHREADS
+    spinlock_init(&x->x_cspace.c_lock);
+#endif
     x->x_sortno = 0;
     x->x_vecsize = 0;
     x->x_f = 0;
@@ -101,6 +122,7 @@ static t_int *sigdelwrite_perform(t_int *w)
     t_sample *vp = c->c_vec, *bp = vp + phase, *ep = vp + (c->c_n + XTRASAMPS);
     phase += n;
 
+    LOCK(c->c_lock);
     while (n--)
     {
         t_sample f = *in++;
@@ -118,6 +140,7 @@ static t_int *sigdelwrite_perform(t_int *w)
         }
     }
     c->c_phase = phase;
+    UNLOCK(c->c_lock);
     return (w+4);
 }
 
@@ -203,11 +226,13 @@ static t_int *sigdelread_perform(t_int *w)
     if (phase < 0) phase += nsamps;
     bp = vp + phase;
 
+    LOCK_SHARED(c->c_lock);
     while (n--)
     {
         *out++ = *bp++;
         if (bp == ep) bp -= nsamps;
     }
+    UNLOCK_SHARED(c->c_lock);
     return (w+5);
 }
 
@@ -288,6 +313,7 @@ static t_int *sigvd_perform(t_int *w)
             *out++ = 0;
         return (w+6);
     }
+    LOCK_SHARED(ctl->c_lock);
     while (n--)
     {
         t_sample delsamps = x->x_sr * *in++ - zerodel, frac;
@@ -314,6 +340,7 @@ static t_int *sigvd_perform(t_int *w)
             )
         );
     }
+    UNLOCK_SHARED(ctl->c_lock);
     return (w+6);
 }
 
