@@ -697,11 +697,49 @@ EXTERN int garray_npoints(t_garray *x);
 EXTERN char *garray_vec(t_garray *x);
 EXTERN void garray_resize(t_garray *x, t_floatarg f);  /* avoid; use this: */
 EXTERN void garray_resize_long(t_garray *x, long n);   /* better version */
-EXTERN void garray_usedindsp(t_garray *x);
+EXTERN void garray_usedindsp(t_garray *x); /* avoid, use garrayref methods instead */
 EXTERN void garray_setsaveit(t_garray *x, int saveit);
 EXTERN t_glist *garray_getglist(t_garray *x);
 EXTERN t_array *garray_getarray(t_garray *x);
 EXTERN t_class *scalar_class;
+
+/* t_garrayref is a safe reference to a garray (similar to gpointer).
+ * The actual array data can be obtained on demand by the functions below.
+ * (You must not store any pointers to array data because it might become stale!)
+ * The advantage of using those functions instead of garray_getfloatwords()
+ * is that you don't have to call garray_usedindsp(), which means the array data
+ * can change without rebuilding the DSP graph!
+ * They also speed up and simplify garray access in control objects because you
+ * do not have to look up the garray every single time.
+ * Finally, they allow to synchronize array data access in parallel DSP processing.
+ * See d_array.c for examples. */
+typedef struct _arrayref
+{
+    t_garray *ar_garray;
+    t_gstub *ar_stub;
+} t_garrayref;
+
+EXTERN void garrayref_init(t_garrayref *x);
+EXTERN void garrayref_unset(t_garrayref *x);
+/* set garrayref to a new garray */
+EXTERN int garrayref_set(t_garrayref *x, t_symbol *arrayname, t_object *obj);
+/* check if the garrayref is valid. Call before accessing the 'ar_garray' member! */
+EXTERN int garrayref_check(t_garrayref *x);
+/* for control objects: safely access array data. If the reference is empty or
+ * stale, (re)acquire the array by name; if 'arrayname' is NULL, fail silently.
+ * Returns 1 if it could get the array data; otherwise returns 0.
+ *
+ * If you want to set the garrayref to another garray, you must either call
+ * garray_set() with the new name, or call garray_unset() and lazily initialize
+ * it in the next call to garrayref_get(). */
+EXTERN int garrayref_get(t_garrayref *x, int *size, t_word **vec, t_symbol *arrayname, t_object *object);
+/* for DSP objects: lock/unlock garray for reading/writing in the perform routine.
+ * Returns 1 if it could get the array data and lock the garray; otherwise returns 0.
+ * WARNING: do not attempt to unlock the garray if you could not lock it! */
+EXTERN int garrayref_write_lock(t_garrayref *x, int *size, t_word **vec);
+EXTERN void garrayref_write_unlock(t_garrayref *x);
+EXTERN int garrayref_read_lock(t_garrayref *x, int *size, t_word **vec);
+EXTERN void garrayref_read_unlock(t_garrayref *x);
 
 EXTERN t_float *value_get(t_symbol *s);
 EXTERN void value_release(t_symbol *s);

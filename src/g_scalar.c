@@ -38,7 +38,7 @@ down the owner) we increase a reference count.  The following routine is called
 whenever a gpointer is unset from pointing here.  If the owner is
 gone and the refcount goes to zero, we can free the gstub safely. */
 
-static void gstub_dis(t_gstub *gs)
+void gstub_dis(t_gstub *gs)
 {
     int refcount = --gs->gs_refcount;
     if ((!refcount) && gs->gs_which == GP_NONE)
