@@ -5,7 +5,21 @@
 /*  send~, receive~, throw~, catch~ */
 
 #include "m_pd.h"
+#include "s_stuff.h"
 #include <string.h>
+
+#if PD_DSPTHREADS
+# include "s_spinlock.h"
+# define LOCK(x) rwspinlock_wrlock((t_rwspinlock *)&x)
+# define UNLOCK(x) rwspinlock_wrunlock((t_rwspinlock *)&x)
+# define LOCK_SHARED(x) rwspinlock_rdlock((t_rwspinlock *)&x)
+# define UNLOCK_SHARED(x) rwspinlock_rdunlock((t_rwspinlock *)&x)
+#else
+# define LOCK(x)
+# define UNLOCK(x)
+# define LOCK_SHARED(x)
+# define UNLOCK_SHARED(x)
+#endif
 
 #define DEFSENDVS 64    /* LATER get send to get this from canvas */
 
@@ -19,6 +33,9 @@ typedef struct _sigsend
     int x_n;
     t_sample *x_vec;
     t_float x_f;
+#if PD_DSPTHREADS
+    t_rwspinlock x_lock;
+#endif
 } t_sigsend;
 
 static void *sigsend_new(t_symbol *s)
@@ -30,27 +47,33 @@ static void *sigsend_new(t_symbol *s)
     x->x_vec = (t_sample *)getbytes(DEFSENDVS * sizeof(t_sample));
     memset((char *)(x->x_vec), 0, DEFSENDVS * sizeof(t_sample));
     x->x_f = 0;
+#if PD_DSPTHREADS
+    rwspinlock_init((t_rwspinlock *)&x->x_lock);
+#endif
     return (x);
 }
 
 static t_int *sigsend_perform(t_int *w)
 {
-    t_sample *in = (t_sample *)(w[1]);
-    t_sample *out = (t_sample *)(w[2]);
+    t_sigsend *x = (t_sigsend *)(w[1]);
+    t_sample *in = (t_sample *)(w[2]);
+    t_sample *out = x->x_vec;
     int n = (int)(w[3]);
+    LOCK(x->x_lock);
     while (n--)
     {
         *out = (PD_BIGORSMALL(*in) ? 0 : *in);
         out++;
         in++;
     }
+    UNLOCK(x->x_lock);
     return (w+4);
 }
 
 static void sigsend_dsp(t_sigsend *x, t_signal **sp)
 {
     if (x->x_n == sp[0]->s_n)
-        dsp_add(sigsend_perform, 3, sp[0]->s_vec, x->x_vec, (t_int)sp[0]->s_n);
+        dsp_add(sigsend_perform, 3, x, sp[0]->s_vec, (t_int)sp[0]->s_n);
     else pd_error(0, "sigsend %s: unexpected vector size", x->x_sym->s_name);
 }
 
@@ -79,6 +102,9 @@ typedef struct _sigreceive
     t_symbol *x_sym;
     t_sample *x_wherefrom;
     int x_n;
+#if PD_DSPTHREADS
+    t_rwspinlock *x_lock;
+#endif
 } t_sigreceive;
 
 static void *sigreceive_new(t_symbol *s)
@@ -87,6 +113,9 @@ static void *sigreceive_new(t_symbol *s)
     x->x_n = DEFSENDVS;             /* LATER find our vector size correctly */
     x->x_sym = s;
     x->x_wherefrom = 0;
+#if PD_DSPTHREADS
+    x->x_lock = 0;
+#endif
     outlet_new(&x->x_obj, &s_signal);
     return (x);
 }
@@ -99,8 +128,10 @@ static t_int *sigreceive_perform(t_int *w)
     t_sample *in = x->x_wherefrom;
     if (in)
     {
+        LOCK_SHARED(*x->x_lock);
         while (n--)
             *out++ = *in++;
+        UNLOCK_SHARED(*x->x_lock);
     }
     else
     {
@@ -119,11 +150,13 @@ static t_int *sigreceive_perf8(t_int *w)
     t_sample *in = x->x_wherefrom;
     if (in)
     {
+        LOCK_SHARED(*x->x_lock);
         for (; n; n -= 8, in += 8, out += 8)
         {
             out[0] = in[0]; out[1] = in[1]; out[2] = in[2]; out[3] = in[3];
             out[4] = in[4]; out[5] = in[5]; out[6] = in[6]; out[7] = in[7];
         }
+        UNLOCK_SHARED(*x->x_lock);
     }
     else
     {
@@ -143,11 +176,19 @@ static void sigreceive_set(t_sigreceive *x, t_symbol *s)
     if (sender)
     {
         if (sender->x_n == x->x_n)
+        {
             x->x_wherefrom = sender->x_vec;
+        #if PD_DSPTHREADS
+            x->x_lock = &sender->x_lock;
+        #endif
+        }
         else
         {
             pd_error(x, "receive~ %s: vector size mismatch", x->x_sym->s_name);
             x->x_wherefrom = 0;
+        #if PD_DSPTHREADS
+            x->x_lock = 0;
+        #endif
         }
     }
     else
@@ -196,6 +237,9 @@ typedef struct _sigcatch
     t_symbol *x_sym;
     int x_n;
     t_sample *x_vec;
+#if PD_DSPTHREADS
+    t_rwspinlock x_lock;
+#endif
 } t_sigcatch;
 
 static void *sigcatch_new(t_symbol *s)
@@ -206,25 +250,34 @@ static void *sigcatch_new(t_symbol *s)
     x->x_n = DEFSENDVS;
     x->x_vec = (t_sample *)getbytes(DEFSENDVS * sizeof(t_sample));
     memset((char *)(x->x_vec), 0, DEFSENDVS * sizeof(t_sample));
+#if PD_DSPTHREADS
+    rwspinlock_init((t_rwspinlock *)&x->x_lock);
+#endif
     outlet_new(&x->x_obj, &s_signal);
     return (x);
 }
 
 static t_int *sigcatch_perform(t_int *w)
 {
-    t_sample *in = (t_sample *)(w[1]);
+    t_sigcatch *x = (t_sigcatch *)(w[1]);
+    t_sample *in = x->x_vec;
     t_sample *out = (t_sample *)(w[2]);
     int n = (int)(w[3]);
+    LOCK(x->x_lock);
     while (n--) *out++ = *in, *in++ = 0;
+    UNLOCK(x->x_lock);
     return (w+4);
 }
 
 /* tb: vectorized catch function */
 static t_int *sigcatch_perf8(t_int *w)
 {
-    t_sample *in = (t_sample *)(w[1]);
+    t_sigcatch *x = (t_sigcatch *)(w[1]);
+    t_sample *in = x->x_vec;
     t_sample *out = (t_sample *)(w[2]);
     int n = (int)(w[3]);
+    /* reading + writing */
+    LOCK(x->x_lock);
     for (; n; n -= 8, in += 8, out += 8)
     {
        out[0] = in[0]; out[1] = in[1]; out[2] = in[2]; out[3] = in[3];
@@ -233,6 +286,7 @@ static t_int *sigcatch_perf8(t_int *w)
        in[0] = 0; in[1] = 0; in[2] = 0; in[3] = 0;
        in[4] = 0; in[5] = 0; in[6] = 0; in[7] = 0;
     }
+    UNLOCK(x->x_lock);
     return (w+4);
 }
 
@@ -241,9 +295,9 @@ static void sigcatch_dsp(t_sigcatch *x, t_signal **sp)
     if (x->x_n == sp[0]->s_n)
     {
         if(sp[0]->s_n&7)
-            dsp_add(sigcatch_perform, 3, x->x_vec, sp[0]->s_vec, (t_int)sp[0]->s_n);
+            dsp_add(sigcatch_perform, 3, x, sp[0]->s_vec, (t_int)sp[0]->s_n);
         else
-            dsp_add(sigcatch_perf8, 3, x->x_vec, sp[0]->s_vec, (t_int)sp[0]->s_n);
+            dsp_add(sigcatch_perf8, 3, x, sp[0]->s_vec, (t_int)sp[0]->s_n);
     }
     else pd_error(0, "sigcatch %s: unexpected vector size", x->x_sym->s_name);
 }
@@ -273,6 +327,9 @@ typedef struct _sigthrow
     t_sample *x_whereto;
     int x_n;
     t_float x_f;
+#if PD_DSPTHREADS
+    t_rwspinlock *x_lock;
+#endif
 } t_sigthrow;
 
 static void *sigthrow_new(t_symbol *s)
@@ -282,6 +339,9 @@ static void *sigthrow_new(t_symbol *s)
     x->x_whereto  = 0;
     x->x_n = DEFSENDVS;
     x->x_f = 0;
+#if PD_DSPTHREADS
+    x->x_lock = 0;
+#endif
     return (x);
 }
 
@@ -293,12 +353,14 @@ static t_int *sigthrow_perform(t_int *w)
     t_sample *out = x->x_whereto;
     if (out)
     {
+        LOCK(*x->x_lock);
         while (n--)
         {
             *out += (PD_BIGORSMALL(*in) ? 0 : *in);
             out++;
             in++;
         }
+        UNLOCK(*x->x_lock);
     }
     return (w+4);
 }
@@ -310,11 +372,19 @@ static void sigthrow_set(t_sigthrow *x, t_symbol *s)
     if (catcher)
     {
         if (catcher->x_n == x->x_n)
+        {
             x->x_whereto = catcher->x_vec;
+        #if PD_DSPTHREADS
+            x->x_lock = &catcher->x_lock;
+        #endif
+        }
         else
         {
             pd_error(x, "throw~ %s: vector size mismatch", x->x_sym->s_name);
             x->x_whereto = 0;
+        #if PD_DSPTHREADS
+            x->x_lock = 0;
+        #endif
         }
     }
     else x->x_whereto = 0;  /* no match: now no longer considered an error */
