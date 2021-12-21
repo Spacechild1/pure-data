@@ -7,6 +7,10 @@
 #include <stdio.h>      /* for read/write to files */
 #include "m_pd.h"
 #include "g_canvas.h"
+#include "s_stuff.h"
+#if PD_DSPTHREADS
+# include "s_spinlock.h"
+#endif
 #include <math.h>
 
 /* jsarlo { */
@@ -116,6 +120,9 @@ struct _garray
     unsigned int  x_listviewing:1;  /* list view window is open */
     unsigned int  x_hidename:1;     /* don't print name above graph */
     unsigned int  x_edit:1;         /* we can edit the array */
+#if PD_DSPTHREADS
+    t_rwspinlock x_lock;
+#endif
 };
 
 static t_pd *garray_arraytemplatecanvas;  /* written at setup w/ global lock */
@@ -177,6 +184,9 @@ static t_garray *graph_scalar(t_glist *gl, t_symbol *s, t_symbol *templatesym,
     x->x_edit = 1;
     glist_add(gl, &x->x_gobj);
     x->x_glist = gl;
+#if PD_DSPTHREADS
+    rwspinlock_init(&x->x_lock);
+#endif
     return (x);
 }
 
@@ -776,9 +786,145 @@ const t_widgetbehavior garray_widgetbehavior =
 
 /* ----------------------- public functions -------------------- */
 
+/* legacy, use garrayref methods instead */
 void garray_usedindsp(t_garray *x)
 {
     x->x_usedindsp = 1;
+}
+
+void garrayref_init(t_garrayref *x)
+{
+    x->ar_garray = 0;
+    x->ar_stub = 0;
+}
+
+void gstub_dis(t_gstub *gs);
+
+void garrayref_unset(t_garrayref *x)
+{
+    x->ar_garray = 0;
+    if (x->ar_stub)
+    {
+        gstub_dis(x->ar_stub);
+        x->ar_stub = 0;
+    }
+}
+
+static int garrayref_findbyname(t_garrayref *x, t_symbol *name, t_object *object)
+{
+    t_garray *g;
+    t_array *a;
+    int npoints;
+    t_word *vec;
+    if (!(g = (t_garray *)pd_findbyclass(name, garray_class)))
+    {
+        if (object)
+            pd_error(object, "%s: %s: no such array",
+                     class_getname(object->te_pd), name->s_name);
+        else
+            pd_error(0, "%s: no such array", name->s_name);
+        return 0;
+    }
+    if (!garray_getfloatwords(g, &npoints, &vec))
+    {
+        if (object)
+            pd_error(object, "%s: bad template for %s",
+                     name->s_name, class_getname(object->te_pd));
+        else
+            pd_error(0, "%s: bad template", name->s_name);
+        return 0;
+    }
+    if (!(a = garray_getarray(g)))
+        return 0;
+    x->ar_garray = g;
+    if (x->ar_stub) gstub_dis(x->ar_stub);
+    x->ar_stub = a->a_stub;
+    a->a_stub->gs_refcount++;
+    return 1;
+}
+
+int garrayref_set(t_garrayref *x, t_symbol *arrayname, t_object *object)
+{
+    /* ignore empty symbol */
+    if (!(*arrayname->s_name && garrayref_findbyname(x, arrayname, object)))
+    {
+        garrayref_unset(x);
+        return 0;
+    }
+    return 1;
+}
+
+int garrayref_check(t_garrayref *x)
+{
+    /* do we have a stub, and if yes, has it been cut off? */
+    t_gstub *gs = x->ar_stub;
+    return gs && (gs->gs_which == GP_ARRAY);
+}
+
+    /* lazily initialize an garrayref by name and return the array data;
+     * if 'arrayname' is NULL, just fail silently. */
+int garrayref_get(t_garrayref *x, int *size, t_word **vec,
+    t_symbol *arrayname, t_object *object)
+{
+    t_array *a;
+    if (!garrayref_check(x))
+    {
+        if (!arrayname || !garrayref_findbyname(x, arrayname, object))
+            return 0;
+    }
+    a = x->ar_stub->gs_un.gs_array;
+    *vec = (t_word *)a->a_vec;
+    *size = a->a_n;
+    return 1;
+}
+
+    /* see m_pd.h. */
+#if !PD_PARALLEL
+#undef garrayref_write_lock
+#undef garrayref_write_unlock
+#undef garrayref_read_lock
+#undef garrayref_read_unlock
+#endif
+
+    /* garrayref_write_lock() and garrayref_read_lock() always fail
+     * silently if garrayref is empty or if the garray has been removed.
+     * In practice, adding/removing garrays triggers a DSP graph update,
+     * so we automatically try to reacquire the garray in our DSP method
+     * by calling garrayref_set().
+     * NOTE: we avoid (un)setting the garrayref in the perform routine
+     * because it would make things more complicated wrt thread-safety. */
+int garrayref_write_lock(t_garrayref *x, int *size, t_word **vec)
+{
+    if (!garrayref_get(x, size, vec, 0, 0))
+        return 0;
+#if PD_DSPTHREADS
+    rwspinlock_wrlock(&x->ar_garray->x_lock);
+#endif
+    return 1;
+}
+
+void garrayref_write_unlock(t_garrayref *x)
+{
+#if PD_DSPTHREADS
+    rwspinlock_wrunlock(&x->ar_garray->x_lock);
+#endif
+}
+
+int garrayref_read_lock(t_garrayref *x, int *size, t_word **vec)
+{
+    if (!garrayref_get(x, size, vec, 0, 0))
+        return 0;
+#if PD_DSPTHREADS
+    rwspinlock_rdlock(&x->ar_garray->x_lock);
+#endif
+    return 1;
+}
+
+void garrayref_read_unlock(t_garrayref *x)
+{
+#if PD_DSPTHREADS
+    rwspinlock_rdunlock(&x->ar_garray->x_lock);
+#endif
 }
 
 static void garray_doredraw(t_gobj *client, t_glist *glist)
