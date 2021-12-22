@@ -115,6 +115,9 @@ struct _instanceinter
     t_guiqueue *i_guiqueuehead;
     t_binbuf *i_inbinbuf;
     char *i_guibuf;
+#if PD_DSPTHREADS
+    pthread_mutex_t i_guimutex;
+#endif
     int i_guihead;
     int i_guitail;
     int i_guisize;
@@ -773,6 +776,9 @@ void sys_vgui(const char *fmt, ...)
 
     if (!sys_havegui())
         return;
+#if PD_DSPTHREADS
+    pthread_mutex_lock(&INTER->i_guimutex);
+#endif
     if (!INTER->i_guibuf)
     {
         if (!(INTER->i_guibuf = malloc(GUI_ALLOCCHUNK)))
@@ -796,6 +802,9 @@ void sys_vgui(const char *fmt, ...)
     {
         fprintf(stderr,
             "Pd: buffer space wasn't sufficient for long GUI string\n");
+    #if PD_DSPTHREADS
+        pthread_mutex_unlock(&INTER->i_guimutex);
+    #endif
         return;
     }
     if (msglen >= INTER->i_guisize - INTER->i_guihead)
@@ -833,6 +842,9 @@ void sys_vgui(const char *fmt, ...)
     }
     INTER->i_guihead += msglen;
     INTER->i_bytessincelastping += msglen;
+#if PD_DSPTHREADS
+    pthread_mutex_unlock(&INTER->i_guimutex);
+#endif
 }
 
 void sys_gui(const char *s)
@@ -1629,6 +1641,9 @@ void s_inter_newpdinstance(void)
     pthread_mutex_init(&INTER->i_mutex, NULL);
     pd_this->pd_islocked = 0;
 #endif
+#if PD_DSPTHREADS
+    pthread_mutex_init(&INTER->i_guimutex, NULL);
+#endif
 #ifdef _WIN32
     INTER->i_freq = 0;
 #endif
@@ -1647,6 +1662,9 @@ void s_inter_free(t_instanceinter *inter)
     }
 #if PDTHREADS
     pthread_mutex_destroy(&INTER->i_mutex);
+#endif
+#if PD_DSPTHREADS
+    pthread_mutex_destroy(&INTER->i_guimutex);
 #endif
     freebytes(inter, sizeof(*inter));
 }
