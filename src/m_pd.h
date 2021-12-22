@@ -111,6 +111,11 @@ typedef unsigned __int64  uint64_t;
 # error invalid FLOATSIZE: must be 32 or 64
 #endif
 
+/* override for parallel processing support */
+#ifndef PD_PARALLEL
+#define PD_PARALLEL 1
+#endif
+
 #define THREADSAFE
 
 typedef PD_LONGINTTYPE t_int;       /* pointer-size integer */
@@ -462,13 +467,20 @@ EXTERN const t_parentwidgetbehavior *pd_getparentwidget(t_pd *x);
 
 /* -------------------- classes -------------- */
 
-#define CLASS_DEFAULT 0         /* flags for new classes below */
+/* flags for new classes below */
 #define CLASS_PD 1
 #define CLASS_GOBJ 2
 #define CLASS_PATCHABLE 3
+#define CLASS_THREADSAFE 4
 #define CLASS_NOINLET 8
 
 #define CLASS_TYPEMASK 3
+
+#if PD_PARALLEL
+# define CLASS_DEFAULT CLASS_THREADSAFE
+#else
+# define CLASS_DEFAULT 0
+#endif
 
 EXTERN t_class *class_new(t_symbol *name, t_newmethod newmethod,
     t_method freemethod, size_t size, int flags, t_atomtype arg1, ...);
@@ -737,10 +749,17 @@ EXTERN int garrayref_get(t_garrayref *x, int *size, t_word **vec, t_symbol *arra
 /* for DSP objects: lock/unlock garray for reading/writing in the perform routine.
  * Returns 1 if it could get the array data and lock the garray; otherwise returns 0.
  * WARNING: do not attempt to unlock the garray if you could not lock it! */
+#if PD_PARALLEL
 THREADSAFE EXTERN int garrayref_write_lock(t_garrayref *x, int *size, t_word **vec);
 THREADSAFE EXTERN void garrayref_write_unlock(t_garrayref *x);
 THREADSAFE EXTERN int garrayref_read_lock(t_garrayref *x, int *size, t_word **vec);
 THREADSAFE EXTERN void garrayref_read_unlock(t_garrayref *x);
+#else
+#define garrayref_write_lock(x, size, vec) garrayref_get(x, size, vec, 0, 0)
+#define garrayref_write_unlock(x)
+#define garrayref_read_lock(x, size, vec) garrayref_get(x, size, vec, 0, 0)
+#define garrayref_read_unlock(x)
+#endif /* PD_PARALLEL */
 
 EXTERN t_float *value_get(t_symbol *s);
 EXTERN void value_release(t_symbol *s);
