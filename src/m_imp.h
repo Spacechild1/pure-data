@@ -58,6 +58,7 @@ struct _class
     char c_firstin;                 /* if patchable, true if draw first inlet */
     char c_drawcommand;             /* a drawing command for a template */
     t_classfreefn c_classfreefn;    /* function to call before freeing class */
+    char c_threadsafe;              /* can be safely used in parallel DSP */
 };
 
 /* m_pd.c */

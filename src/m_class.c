@@ -499,6 +499,7 @@ t_class *class_new(t_symbol *s, t_newmethod newmethod, t_method freemethod,
     c->c_pwb = 0;
     c->c_firstin = ((flags & CLASS_NOINLET) == 0);
     c->c_patchable = (typeflag == CLASS_PATCHABLE);
+    c->c_threadsafe = (flags & CLASS_THREADSAFE) != 0;
     c->c_gobj = (typeflag >= CLASS_GOBJ);
     c->c_drawcommand = 0;
     c->c_floatsignalin = 0;
