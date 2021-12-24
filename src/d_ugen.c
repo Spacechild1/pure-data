@@ -383,7 +383,7 @@ void block_tilde_setup(void)
 
 /* ------------------ DSP call list ----------------------- */
 
-static t_int dsp_done(t_int *w)
+t_int *dsp_done(t_int *w)
 {
     return (0);
 }
