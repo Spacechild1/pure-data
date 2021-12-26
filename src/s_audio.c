@@ -23,6 +23,10 @@
 #include <string.h>
 #include <errno.h>
 
+#if PD_DSPTHREADS
+#include "s_spinlock.h"
+#endif
+
 #ifdef _MSC_VER
 #define snprintf _snprintf
 #endif
@@ -80,6 +84,26 @@ static int audio_getfixedblocksize(int api)
     return 0;
 }
 
+void sys_audio_free(void)
+{
+    if (STUFF->st_soundin)
+        freebytes(STUFF->st_soundin,
+            (STUFF->st_inchannels ? STUFF->st_inchannels : 2) *
+                (DEFDACBLKSIZE * sizeof(t_sample)));
+    STUFF->st_soundin = 0;
+    if (STUFF->st_soundout)
+        freebytes(STUFF->st_soundout,
+            (STUFF->st_outchannels ? STUFF->st_outchannels : 2) *
+                (DEFDACBLKSIZE * sizeof(t_sample)));
+    STUFF->st_soundout = 0;
+#if PD_DSPTHREADS
+    if (STUFF->st_soundout_locks)
+        freebytes(STUFF->st_soundout_locks,
+            STUFF->st_outchannels * sizeof(t_spinlock));
+    STUFF->st_soundout_locks = 0;
+#endif
+}
+
     /* inform rest of Pd of current channels and sample rate.  Do this when
     opening audio device.  This is also called from alsamm but I think that
     is no longer in use, so in principle this could be static. */
@@ -90,15 +114,10 @@ void sys_setchsr(int chin, int chout, int sr)
                 (DEFDACBLKSIZE*sizeof(t_sample));
     int outbytes = (chout ? chout : 2) *
                 (DEFDACBLKSIZE*sizeof(t_sample));
+    int i;
 
-    if (STUFF->st_soundin)
-        freebytes(STUFF->st_soundin,
-            (STUFF->st_inchannels? STUFF->st_inchannels : 2) *
-                (DEFDACBLKSIZE*sizeof(t_sample)));
-    if (STUFF->st_soundout)
-        freebytes(STUFF->st_soundout,
-            (STUFF->st_outchannels? STUFF->st_outchannels : 2) *
-                (DEFDACBLKSIZE*sizeof(t_sample)));
+    sys_audio_free();
+
     STUFF->st_inchannels = chin;
     STUFF->st_outchannels = chout;
     if (!audio_isfixedsr(sys_audioapiopened))
@@ -109,6 +128,12 @@ void sys_setchsr(int chin, int chout, int sr)
 
     STUFF->st_soundout = (t_sample *)getbytes(outbytes);
     memset(STUFF->st_soundout, 0, outbytes);
+
+#if PD_DSPTHREADS
+    STUFF->st_soundout_locks = (t_spinlock *)getbytes(chout * sizeof(t_spinlock));
+    for (i = 0; i < chout; i++)
+        spinlock_init(&STUFF->st_soundout_locks[i]);
+#endif
 
     logpost(NULL, PD_VERBOSE, "input channels = %d, output channels = %d",
             STUFF->st_inchannels, STUFF->st_outchannels);

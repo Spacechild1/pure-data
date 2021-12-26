@@ -60,13 +60,20 @@ void s_stuff_newpdinstance(void)
     STUFF->st_externlist = STUFF->st_searchpath =
         STUFF->st_staticpath = STUFF->st_helppath = STUFF->st_temppath = 0;
     STUFF->st_schedblocksize = STUFF->st_blocksize = DEFDACBLKSIZE;
+    STUFF->st_inchannels = STUFF->st_outchannels = 0;
     STUFF->st_dacsr = DEFDACSAMPLERATE;
+    STUFF->st_soundin = NULL;
+    STUFF->st_soundout = NULL;
     STUFF->st_printhook = sys_printhook;
     STUFF->st_impdata = NULL;
+    STUFF->st_soundout_locks = NULL;
 }
+
+void sys_audio_free(void);
 
 void s_stuff_freepdinstance(void)
 {
+    sys_audio_free();
     freebytes(STUFF, sizeof(*STUFF));
 }
 
