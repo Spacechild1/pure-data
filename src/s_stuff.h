@@ -441,6 +441,7 @@ struct _instancestuff
     double st_time_per_dsp_tick;    /* obsolete - included for GEM?? */
     t_printhook st_printhook;   /* set this to override per-instance printing */
     void *st_impdata; /* optional implementation-specific data for libpd, etc */
+    struct _spinlock *st_soundout_locks; /* spinlocks for dac~ */
 };
 
 #define STUFF (pd_this->pd_stuff)
