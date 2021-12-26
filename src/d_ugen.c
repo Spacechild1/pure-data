@@ -732,6 +732,30 @@ struct _dspcontext
 
 #define t_dspcontext struct _dspcontext
 
+#if PD_DSPTHREADS
+
+t_dsptaskqueue * dsptaskqueue_push(t_dsptaskqueue *newqueue)
+{
+    t_dsptaskqueue *old;
+    if (!THIS->u_context || !((old = THIS->u_context->dc_dspqueue)))
+    {
+        bug("dsptaskqueue_push");
+        return 0;
+    }
+    THIS->u_context->dc_dspqueue = newqueue;
+    return old;
+}
+
+void dsptaskqueue_pop(t_dsptaskqueue *oldqueue)
+{
+    if (THIS->u_context && THIS->u_context->dc_dspqueue)
+        THIS->u_context->dc_dspqueue = oldqueue;
+    else
+        bug("dsptaskqueue_pop");
+}
+
+#endif /* PD_DSPTHREADS */
+
     /* get a new signal for the current context - used by clone~ object */
 t_signal *signal_newfromcontext(int borrowed)
 {
@@ -788,6 +812,16 @@ void ugen_start(void)
 int ugen_getsortno(void)
 {
     return (THIS->u_sortno);
+}
+
+t_int *ugen_getchain(void)
+{
+    return THIS->u_dspchain;
+}
+
+int ugen_getsize(void)
+{
+    return THIS->u_dspchainsize;
 }
 
 #if 0
