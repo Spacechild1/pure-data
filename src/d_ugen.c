@@ -34,19 +34,62 @@ void voutlet_dspepilog(struct _voutlet *x, t_signal **parentsigs,
     int myvecsize, int calcsize, int phase, int period, int frequency,
     int downsample, int upsample, int reblock, int switched);
 
+/* ---------------------------- t_signalcontext ----------------------------- */
+
+typedef struct _signalcontext
+{
+    t_signal *sc_signals;       /* list of signals used by DSP chain */
+        /* list of signals which can be reused, sorted by buffer size */
+    t_signal *sc_freelist[MAXLOGSIG+1];
+        /* list of reusable "borrowed" signals (which don't own sample buffers) */
+    t_signal *sc_freeborrowed;
+} t_signalcontext;
+
+t_signalcontext *signalcontext_new(void)
+{
+    t_signalcontext *x = (t_signalcontext *)getbytes(sizeof(t_signalcontext));
+    x->sc_signals = 0;
+    return x;
+}
+
+    /* call this to free all the signals, e.g. before creating a new DSP graph */
+void signalcontext_clear(t_signalcontext *x)
+{
+    t_signal *sig;
+    int i;
+    while ((sig = x->sc_signals))
+    {
+        x->sc_signals = sig->s_nextused;
+        if (!sig->s_isborrowed)
+            t_freebytes(sig->s_vec, sig->s_vecsize * sizeof (*sig->s_vec));
+        t_freebytes(sig, sizeof(*sig));
+    }
+    for (i = 0; i <= MAXLOGSIG; i++)
+        x->sc_freelist[i] = 0;
+    x->sc_freeborrowed = 0;
+}
+
+void signalcontext_free(t_signalcontext *x)
+{
+    signalcontext_clear(x);
+    freebytes(x, sizeof(t_signalcontext));
+}
+
+t_signalcontext *signalcontext_current(void);
+t_signalcontext *signalcontext_push(t_signalcontext *newcontext);
+void signalcontext_pop(t_signalcontext *oldcontext);
+
+/* ---------------------------- t_instanceugen ----------------------------- */
+
 struct _instanceugen
 {
     t_int *u_dspchain;         /* DSP chain */
     int u_dspchainsize;        /* number of elements in DSP chain */
-    t_signal *u_signals;       /* list of signals used by DSP chain */
     int u_sortno;              /* number of DSP sortings so far */
-        /* list of signals which can be reused, sorted by buffer size */
-    t_signal *u_freelist[MAXLOGSIG+1];
-        /* list of reusable "borrowed" signals (which don't own sample buffers) */
-    t_signal *u_freeborrowed;
     int u_phase;
     int u_loud;
-    struct _dspcontext *u_context;
+    t_signalcontext *u_signals; /* global signal context */
+    struct _dspcontext *u_context; /* current DSP context */
 #if PD_DSPTHREADS
     t_dsptaskqueue *u_dspqueue; /* toplevel DSP thread queue */
     t_lockfree_stack u_clocks; /* only for the main queue */
@@ -60,7 +103,7 @@ void d_ugen_newpdinstance(void)
     THIS = getbytes(sizeof(*THIS));
     THIS->u_dspchain = 0;
     THIS->u_dspchainsize = 0;
-    THIS->u_signals = 0;
+    THIS->u_signals = signalcontext_new();
 #if PD_DSPTHREADS
     THIS->u_dspqueue = dsptaskqueue_new();
     lockfree_stack_init(&THIS->u_clocks);
@@ -69,6 +112,7 @@ void d_ugen_newpdinstance(void)
 
 void d_ugen_freepdinstance(void)
 {
+    signalcontext_free(THIS->u_signals);
 #if PD_DSPTHREADS
     dsptaskqueue_release(THIS->u_dspqueue);
 #endif
@@ -422,31 +466,14 @@ int ilog2(int n)
     return (r);
 }
 
-
-    /* call this when DSP is stopped to free all the signals */
-static void signal_cleanup(void)
-{
-    t_signal *sig;
-    int i;
-    while ((sig = THIS->u_signals))
-    {
-        THIS->u_signals = sig->s_nextused;
-        if (!sig->s_isborrowed)
-            t_freebytes(sig->s_vec, sig->s_vecsize * sizeof (*sig->s_vec));
-        t_freebytes(sig, sizeof *sig);
-    }
-    for (i = 0; i <= MAXLOGSIG; i++)
-        THIS->u_freelist[i] = 0;
-    THIS->u_freeborrowed = 0;
-}
-
     /* mark the signal "reusable." */
 void signal_makereusable(t_signal *sig)
 {
     int logn = ilog2(sig->s_vecsize);
+    t_signalcontext *context = signalcontext_current();
 #if 1
     t_signal *s5;
-    for (s5 = THIS->u_freeborrowed; s5; s5 = s5->s_nextfree)
+    for (s5 = context->sc_freeborrowed; s5; s5 = s5->s_nextfree)
     {
         if (s5 == sig)
         {
@@ -454,7 +481,7 @@ void signal_makereusable(t_signal *sig)
             return;
         }
     }
-    for (s5 = THIS->u_freelist[logn]; s5; s5 = s5->s_nextfree)
+    for (s5 = context->sc_freelist[logn]; s5; s5 = s5->s_nextfree)
     {
         if (s5 == sig)
         {
@@ -474,16 +501,16 @@ void signal_makereusable(t_signal *sig)
         s2->s_refcount--;
         if (!s2->s_refcount)
             signal_makereusable(s2);
-        sig->s_nextfree = THIS->u_freeborrowed;
-        THIS->u_freeborrowed = sig;
+        sig->s_nextfree = context->sc_freeborrowed;
+        context->sc_freeborrowed = sig;
     }
     else
     {
             /* if it's a real signal (not borrowed), put it on the free list
                 so we can reuse it. */
-        if (THIS->u_freelist[logn] == sig) bug("signal_free 2");
-        sig->s_nextfree = THIS->u_freelist[logn];
-        THIS->u_freelist[logn] = sig;
+        if (context->sc_freelist[logn] == sig) bug("signal_free 2");
+        sig->s_nextfree = context->sc_freelist[logn];
+        context->sc_freelist[logn] = sig;
     }
 }
 
@@ -494,6 +521,7 @@ void signal_makereusable(t_signal *sig)
 static t_signal *signal_new(int n, t_float sr)
 {
     int logn, vecsize = 0;
+    t_signalcontext *context = signalcontext_current();
     t_signal *ret, **whichlist;
     logn = ilog2(n);
     if (n)
@@ -502,10 +530,10 @@ static t_signal *signal_new(int n, t_float sr)
             vecsize *= 2;
         if (logn > MAXLOGSIG)
             bug("signal buffer too large");
-        whichlist = THIS->u_freelist + logn;
+        whichlist = context->sc_freelist + logn;
     }
     else
-        whichlist = &THIS->u_freeborrowed;
+        whichlist = &context->sc_freeborrowed;
 
         /* first try to reclaim one from the free list */
     if ((ret = *whichlist))
@@ -524,8 +552,8 @@ static t_signal *signal_new(int n, t_float sr)
             ret->s_vec = 0;
             ret->s_isborrowed = 1;
         }
-        ret->s_nextused = THIS->u_signals;
-        THIS->u_signals = ret;
+        ret->s_nextused = context->sc_signals;
+        context->sc_signals = ret;
     }
     ret->s_n = n;
     ret->s_vecsize = vecsize;
@@ -603,6 +631,7 @@ struct _dspcontext
     int dc_ninlets;
     int dc_noutlets;
     t_signal **dc_iosigs;
+    t_signalcontext *dc_signals;
     t_float dc_srate;
     int dc_vecsize;         /* vector size, power of two */
     int dc_calcsize;        /* number of elements to calculate */
@@ -620,6 +649,31 @@ t_signal *signal_newfromcontext(int borrowed)
         THIS->u_context->dc_srate));
 }
 
+t_signalcontext *signalcontext_current(void)
+{
+    return THIS->u_context->dc_signals;
+}
+
+t_signalcontext *signalcontext_push(t_signalcontext *newcontext)
+{
+    t_signalcontext *old;
+    if (!THIS->u_context || !((old = THIS->u_context->dc_signals)))
+    {
+        bug("signalcontext_push");
+        return 0;
+    }
+    THIS->u_context->dc_signals = newcontext;
+    return old;
+}
+
+void signalcontext_pop(t_signalcontext *oldcontext)
+{
+    if (THIS->u_context && THIS->u_context->dc_signals)
+        THIS->u_context->dc_signals = oldcontext;
+    else
+        bug("signalcontext_pop");
+}
+
 void ugen_stop(void)
 {
     if (THIS->u_dspchain)
@@ -628,8 +682,7 @@ void ugen_stop(void)
             THIS->u_dspchainsize * sizeof (t_int));
         THIS->u_dspchain = 0;
     }
-    signal_cleanup();
-
+    signalcontext_clear(THIS->u_signals);
 }
 
 void ugen_start(void)
@@ -692,6 +745,10 @@ t_dspcontext *ugen_start_graph(int toplevel, t_signal **sp,
     dc->dc_ninlets = ninlets;
     dc->dc_noutlets = noutlets;
     dc->dc_parentcontext = THIS->u_context;
+    /* use parent signal context by default. This might be overriden
+     * by block~ (see "parallel") or by signalcontext_push(). */
+    dc->dc_signals = THIS->u_context ? THIS->u_context->dc_signals
+        : THIS->u_signals;
     THIS->u_context = dc;
     return (dc);
 }
