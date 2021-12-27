@@ -13,6 +13,7 @@
 
 #include "m_pd.h"
 #include "m_imp.h"
+#include "s_stuff.h"
 #include <stdlib.h>
 #include <stdarg.h>
 
@@ -44,6 +45,9 @@ struct _instanceugen
     int u_phase;
     int u_loud;
     struct _dspcontext *u_context;
+#if PD_DSPTHREADS
+    t_dsptaskqueue *u_dspqueue; /* toplevel DSP thread queue */
+#endif
 };
 
 #define THIS (pd_this->pd_ugen)
@@ -54,10 +58,16 @@ void d_ugen_newpdinstance(void)
     THIS->u_dspchain = 0;
     THIS->u_dspchainsize = 0;
     THIS->u_signals = 0;
+#if PD_DSPTHREADS
+    THIS->u_dspqueue = dsptaskqueue_new();
+#endif
 }
 
 void d_ugen_freepdinstance(void)
 {
+#if PD_DSPTHREADS
+    dsptaskqueue_free(THIS->u_dspqueue);
+#endif
     freebytes(THIS, sizeof(*THIS));
 }
 
@@ -365,8 +375,14 @@ void dsp_tick(void)
     if (THIS->u_dspchain)
     {
         t_int *ip;
+    #if PD_DSPTHREADS
+        dsptaskqueue_reset(THIS->u_dspqueue);
+    #endif
         for (ip = THIS->u_dspchain; ip; ) ip = (*(t_perfroutine)(*ip))(ip);
         THIS->u_phase++;
+    #if PD_DSPTHREADS
+        dsptaskqueue_join(THIS->u_dspqueue);
+    #endif
     }
 }
 
