@@ -27,6 +27,7 @@ typedef struct _vinlet
     t_object x_obj;
     t_canvas *x_canvas;
     t_inlet *x_inlet;
+    char x_parallel;
     int x_bufsize;
     t_sample *x_buf;         /* signal buffer; zero if not a signal */
     t_sample *x_endbuf;
@@ -45,6 +46,7 @@ static void *vinlet_new(t_symbol *s)
     t_vinlet *x = (t_vinlet *)pd_new(vinlet_class);
     x->x_canvas = canvas_getcurrent();
     x->x_inlet = canvas_addinlet(x->x_canvas, &x->x_obj.ob_pd, 0);
+    x->x_parallel = 0;
     x->x_bufsize = 0;
     x->x_buf = 0;
     outlet_new(&x->x_obj, 0);
@@ -132,9 +134,14 @@ static void vinlet_dsp(t_vinlet *x, t_signal **sp)
     outsig = sp[0];
     if (x->x_directsignal)
     {
-        signal_setborrowed(sp[0], x->x_directsignal);
+        /* fill in fake signal created in ugen_doit(). */
+        signal_setborrowed(outsig, x->x_directsignal);
     }
-    else
+    else if (x->x_parallel) /* parallel */
+    {
+        dsp_add_copy(x->x_buf, outsig->s_vec, outsig->s_n);
+    }
+    else /* reblocking */
     {
         dsp_add(vinlet_perform, 3, x, outsig->s_vec, (t_int)outsig->s_vecsize);
         x->x_read = x->x_buf;
@@ -166,7 +173,7 @@ int inlet_getsignalindex(t_inlet *x);
         /* set up prolog DSP code  */
 void vinlet_dspprolog(struct _vinlet *x, t_signal **parentsigs,
     int myvecsize, int calcsize, int phase, int period, int frequency,
-    int downsample, int upsample,  int reblock, int switched)
+    int downsample, int upsample, int reblock, int switched, int parallel)
 {
     t_signal *insig;
         /* no buffer means we're not a signal inlet */
@@ -174,12 +181,13 @@ void vinlet_dspprolog(struct _vinlet *x, t_signal **parentsigs,
         return;
     x->x_updown.downsample = downsample;
     x->x_updown.upsample   = upsample;
+    x->x_parallel = parallel;
 
         /* if the "reblock" flag is set, arrange to copy data in from the
         parent. */
     if (reblock)
     {
-        int parentvecsize, bufsize, oldbufsize, prologphase;
+        int parentvecsize, bufsize, prologphase;
         int re_parentvecsize; /* resampled parentvectorsize */
             /* this should never happen: */
         if (!x->x_buf) return;
@@ -203,10 +211,10 @@ void vinlet_dspprolog(struct _vinlet *x, t_signal **parentsigs,
 
         bufsize = re_parentvecsize;
         if (bufsize < myvecsize) bufsize = myvecsize;
-        if (bufsize != (oldbufsize = x->x_bufsize))
+        if (bufsize != x->x_bufsize)
         {
             t_sample *buf = x->x_buf;
-            t_freebytes(buf, oldbufsize * sizeof(*buf));
+            t_freebytes(buf, x->x_bufsize * sizeof(*buf));
             buf = (t_sample *)t_getbytes(bufsize * sizeof(*buf));
             memset((char *)buf, 0, bufsize * sizeof(*buf));
             x->x_bufsize = bufsize;
@@ -231,7 +239,7 @@ void vinlet_dspprolog(struct _vinlet *x, t_signal **parentsigs,
                   re_parentvecsize, method);
               dsp_add(vinlet_doprolog, 3, x, x->x_updown.s_vec,
                   (t_int)re_parentvecsize);
-        }
+            }
 
             /* if the input signal's reference count is zero, we have
                to free it here because we didn't in ugen_doit(). */
@@ -239,6 +247,32 @@ void vinlet_dspprolog(struct _vinlet *x, t_signal **parentsigs,
                 signal_makereusable(insig);
         }
         else memset((char *)(x->x_buf), 0, bufsize * sizeof(*x->x_buf));
+        x->x_directsignal = 0;
+    }
+    else if (parallel)
+    {
+        if (myvecsize != x->x_bufsize)
+        {
+            t_sample *buf = x->x_buf;
+            t_freebytes(buf, x->x_bufsize * sizeof(*buf));
+            buf = (t_sample *)t_getbytes(myvecsize * sizeof(*buf));
+            x->x_bufsize = myvecsize;
+            x->x_buf = buf;
+            x->x_endbuf = buf + myvecsize;
+        }
+        if (parentsigs)
+        {
+            insig = parentsigs[inlet_getsignalindex(x->x_inlet)];
+                /* copy input signals to buffer. LATER think how to avoid the
+                 * extra copy, see vinlet_dsp(). */
+            dsp_add_copy(insig->s_vec, x->x_buf, myvecsize);
+                /* if the input signal's reference count is zero, we have
+                 * to free it here because we didn't in ugen_doit(). */
+            if (!insig->s_refcount)
+                signal_makereusable(insig);
+        }
+        else
+            memset((char *)(x->x_buf), 0, myvecsize * sizeof(*x->x_buf));
         x->x_directsignal = 0;
     }
     else
@@ -321,7 +355,8 @@ typedef struct _voutlet
         /* and here's a flag indicating that we aren't blocked but have to
         do a copy (because we're switched). */
     char x_justcopyout;
-  t_resample x_updown;
+    char x_parallel;
+    t_resample x_updown;
 } t_voutlet;
 
 static void *voutlet_new(t_symbol *s)
@@ -434,21 +469,23 @@ static t_int *voutlet_doepilog_resampling(t_int *w)
 
 int outlet_getsignalindex(t_outlet *x);
 
-        /* prolog for outlets -- store pointer to the outlet on the
-        parent, which, if "reblock" is false, will want to refer
+        /* prolog for outlets -- store pointer to the outlet on the parent,
+        which, if "reblock" and "parallel" is false, will want to refer
         back to whatever we see on our input during the "dsp" method
-        called later.  */
+        called later. If "parallel" is true, we copy the previous buffer
+        content to the output signals. */
 void voutlet_dspprolog(struct _voutlet *x, t_signal **parentsigs,
     int myvecsize, int calcsize, int phase, int period, int frequency,
-    int downsample, int upsample, int reblock, int switched)
+    int downsample, int upsample, int reblock, int switched, int parallel)
 {
         /* no buffer means we're not a signal outlet */
     if (!x->x_buf)
         return;
     x->x_updown.downsample=downsample;
     x->x_updown.upsample=upsample;
-    x->x_justcopyout = (switched && !reblock);
-    if (reblock)
+    x->x_justcopyout = (switched && !reblock && !parallel);
+    x->x_parallel = parallel;
+    if (reblock || parallel)
     {
         x->x_directsignal = 0;
     }
@@ -458,6 +495,24 @@ void voutlet_dspprolog(struct _voutlet *x, t_signal **parentsigs,
         x->x_directsignal =
             parentsigs[outlet_getsignalindex(x->x_parentoutlet)];
     }
+    if (parallel && parentsigs)
+    {
+        t_signal *outsig;
+        if (myvecsize != x->x_bufsize)
+        {
+            t_sample *buf = x->x_buf;
+            t_freebytes(buf, x->x_bufsize * sizeof(*buf));
+            buf = (t_sample *)t_getbytes(myvecsize * sizeof(*buf));
+            memset((char *)buf, 0, myvecsize * sizeof(*buf));
+            x->x_bufsize = myvecsize;
+            x->x_buf = buf;
+        }
+        outsig = parentsigs[outlet_getsignalindex(x->x_parentoutlet)];
+        if (outsig->s_n != myvecsize) bug("voutlet_dspprolog: bad vecsize");
+            /* copy previous buffer content to output signals. the following
+             * DSP chain can now safely write to the buffer, see voutlet_dsp(). */
+        dsp_add_copy(x->x_buf, outsig->s_vec, myvecsize);
+    }
 }
 
 static void voutlet_dsp(t_voutlet *x, t_signal **sp)
@@ -465,16 +520,20 @@ static void voutlet_dsp(t_voutlet *x, t_signal **sp)
     t_signal *insig;
     if (!x->x_buf) return;
     insig = sp[0];
-    if (x->x_justcopyout)
+    if (x->x_justcopyout) /* switched, but not reblocked or parallel */
         dsp_add_copy(insig->s_vec, x->x_directsignal->s_vec, insig->s_n);
     else if (x->x_directsignal)
     {
-            /* if we're just going to make the signal available on the
-            parent patch, hand it off to the parent signal. */
-        /* this is done elsewhere--> sp[0]->s_refcount++; */
-        signal_setborrowed(x->x_directsignal, sp[0]);
+        /* if we're just going to make the signal available on the
+         * parent patch, hand it off to the parent signal.
+         * this is done elsewhere--> sp[0]->s_refcount++; */
+        signal_setborrowed(x->x_directsignal, insig);
     }
-    else
+    else if (x->x_parallel) /* parallel processing */
+        /* write to buffer. at this point, we have already copied the
+         * previous buffer to the signal outlets, see voutlet_dspprolog(). */
+        dsp_add_copy(insig->s_vec, x->x_buf, insig->s_n);
+    else /* reblocked */
         dsp_add(voutlet_perform, 3, x, insig->s_vec, (t_int)insig->s_n);
 }
 
@@ -483,7 +542,7 @@ static void voutlet_dsp(t_voutlet *x, t_signal **sp)
         If we aren't reblocking, there's nothing to do here.  */
 void voutlet_dspepilog(struct _voutlet *x, t_signal **parentsigs,
     int myvecsize, int calcsize, int phase, int period, int frequency,
-    int downsample, int upsample, int reblock, int switched)
+    int downsample, int upsample, int reblock, int switched, int parallel)
 {
     if (!x->x_buf) return;  /* this shouldn't be necesssary... */
     x->x_updown.downsample=downsample;
@@ -491,7 +550,7 @@ void voutlet_dspepilog(struct _voutlet *x, t_signal **parentsigs,
     if (reblock)
     {
         t_signal *outsig;
-        int parentvecsize, bufsize, oldbufsize;
+        int parentvecsize, bufsize;
         int re_parentvecsize;
         int bigperiod, epilogphase, blockphase;
         if (parentsigs)
@@ -512,10 +571,10 @@ void voutlet_dspepilog(struct _voutlet *x, t_signal **parentsigs,
         blockphase = (phase + period - 1) & (bigperiod - 1) & (- period);
         bufsize = re_parentvecsize;
         if (bufsize < myvecsize) bufsize = myvecsize;
-        if (bufsize != (oldbufsize = x->x_bufsize))
+        if (bufsize != x->x_bufsize)
         {
             t_sample *buf = x->x_buf;
-            t_freebytes(buf, oldbufsize * sizeof(*buf));
+            t_freebytes(buf, x->x_bufsize * sizeof(*buf));
             buf = (t_sample *)t_getbytes(bufsize * sizeof(*buf));
             memset((char *)buf, 0, bufsize * sizeof(*buf));
             x->x_bufsize = bufsize;
