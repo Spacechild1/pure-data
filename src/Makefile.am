@@ -99,6 +99,7 @@ pd_SOURCES_core = \
     d_ctl.c \
     d_dac.c \
     d_delay.c \
+    d_threadpool.c \
     d_fft.c \
     d_filter.c \
     d_global.c \
