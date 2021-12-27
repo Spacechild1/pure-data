@@ -216,10 +216,12 @@ typedef struct _block
     char x_reblock;     /* true if inlets and outlets are reblocking */
 #if PD_DSPTHREADS
     char x_parallel;    /* true if we are processing in parallel */
+    char x_join;        /* true if this canvas should join DSP tasks of subpatches */
     t_signalcontext *x_signals; /* signal context for parallel processing */
     t_dsptask *x_task;  /* DSP task for parallel processing */
     int x_taskonset;    /* beginning of parallel task in the chain */
     int x_tasklength;   /* length of parallel task */
+    t_dsptaskqueue *x_dspqueue; /* maintain a DSP task queue and join tasks */
 #endif
     int x_upsample;     /* upsampling-factor */
     int x_downsample;   /* downsampling-factor */
@@ -240,10 +242,12 @@ static void *block_new(t_floatarg fvecsize, t_floatarg foverlap,
     x->x_switchon = 1;
 #if PD_DSPTHREADS
     x->x_parallel = 0;
+    x->x_join = 0;
     x->x_signals = 0;
     x->x_task = 0;
     x->x_taskonset = 0;
     x->x_tasklength = 0,
+    x->x_dspqueue = 0;
 #endif
     block_set(x, fvecsize, foverlap, fupsample);
     return (x);
@@ -256,6 +260,8 @@ static void block_free(t_block *x)
         signalcontext_free(x->x_signals);
     if (x->x_task)
         dsptask_free(x->x_task);
+    if (x->x_dspqueue)
+        dsptaskqueue_release(x->x_dspqueue);
 #endif
 }
 
@@ -403,6 +409,19 @@ static void block_parallel(t_block *x, t_floatarg f)
     }
 }
 
+static void block_join(t_block *x, t_floatarg f)
+{
+    int join = f != 0;
+    if (join != x->x_join)
+    {
+        x->x_join = join;
+        if (x->x_dspqueue)
+            dsptaskqueue_release(x->x_dspqueue);
+        x->x_dspqueue = join ? dsptaskqueue_new() : 0;
+        canvas_update_dsp();
+    }
+}
+
 static t_int *block_schedtask(t_int *w)
 {
     t_block *x = (t_block *)w[1];
@@ -435,6 +454,7 @@ void block_tilde_setup(void)
         A_DEFFLOAT, A_DEFFLOAT, A_DEFFLOAT, 0);
 #if PD_DSPTHREADS
     class_addmethod(block_class, (t_method)block_parallel, gensym("parallel"), A_FLOAT, 0);
+    class_addmethod(block_class, (t_method)block_join, gensym("join"), A_FLOAT, 0);
 #endif
     class_addmethod(block_class, (t_method)block_dsp, gensym("dsp"), A_CANT, 0);
     class_addfloat(block_class, block_float);
@@ -1078,7 +1098,7 @@ void ugen_done_graph(t_dspcontext *dc)
     int chainblockbegin;    /* DSP chain onset before block prolog code */
     int chainblockend;      /* and after block epilog code */
     int chainafterall;      /* and after signal outlet epilog */
-    int reblock = 0, switched, parallel;
+    int reblock = 0, switched, parallel, join;
     int downsample = 1, upsample = 1;
     /* debugging printout */
 
@@ -1160,6 +1180,7 @@ void ugen_done_graph(t_dspcontext *dc)
             blk->x_task = 0;
         }
         parallel = blk->x_parallel;
+        join = blk->x_join;
         if (parallel && reblock && parent_context)
         {
             /* the code for reblocking is rather complicated and I am not
@@ -1171,8 +1192,17 @@ void ugen_done_graph(t_dspcontext *dc)
             pd_error(blk, "reblocking + parallel processing not supported (yet)");
             parallel = 0;
         }
+        if (parallel && join)
+        {
+            /* it doesn't make sense to use 'parallel' together with 'join',
+             * because the latter will force the former to run synchronously,
+             * preventing any kind of parallelism. */
+            logpost(blk, PD_NORMAL, "block~: warning: using 'parallel' "
+                "and 'join' in the same canvas has no effect.");
+        }
     #else
         parallel = 0;
+        join = 0;
     #endif
     }
     else
@@ -1186,6 +1216,7 @@ void ugen_done_graph(t_dspcontext *dc)
         if (!parent_context) reblock = 1;
         switched = 0;
         parallel = 0;
+        join = 0;
     }
     dc->dc_reblock = reblock;
     dc->dc_switched = switched;
@@ -1218,8 +1249,8 @@ void ugen_done_graph(t_dspcontext *dc)
     }
 
     if (THIS->u_loud)
-        post("reblock %d, switched %d, parallel %d",
-            reblock, switched, parallel);
+        post("reblock %d, switched %d, parallel %d, join %d",
+            reblock, switched, parallel, join);
 
         /* schedule prologs for inlets and outlets.  If the "reblock" flag
         is set, an inlet will put code on the DSP chain to copy its input
@@ -1252,6 +1283,13 @@ void ugen_done_graph(t_dspcontext *dc)
         blk->x_chainonset = THIS->u_dspchainsize - 1;
     }
 #if PD_DSPTHREADS
+    if (join)
+    {
+            /* this canvas manages its own DSP task queue. this part comes
+             * after the prolog, so that it gets skipped if we're switched off. */
+        dc->dc_dspqueue = blk->x_dspqueue;
+        dsp_add_reset(blk->x_dspqueue);
+    }
     if (parallel)
     {
             /* this canvas needs its own private signal context. */
@@ -1328,6 +1366,13 @@ void ugen_done_graph(t_dspcontext *dc)
         blk->x_tasklength = THIS->u_dspchainsize - blk->x_taskonset - 1;
         if (THIS->u_loud)
             post("parallel DSP task length: %d", blk->x_tasklength);
+    }
+
+    if (join)
+    {
+        /* join DSP tasks managed by this canvas. this must come before
+         * the blockepilog, so that it gets skipped if we're switched off. */
+        dsp_add_join(blk->x_dspqueue);
     }
 #endif /* PD_DSPTHREADS */
 
