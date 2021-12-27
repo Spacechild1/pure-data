@@ -403,6 +403,8 @@ t_dsptaskqueue * dsptaskqueue_new(void);
 void dsptaskqueue_release(t_dsptaskqueue *x);
 void dsptaskqueue_reset(t_dsptaskqueue *x);
 void dsptaskqueue_join(t_dsptaskqueue *x);
+void dsp_add_reset(t_dsptaskqueue *x);
+void dsp_add_join(t_dsptaskqueue *x);
 
 EXTERN_STRUCT _dsptask;
 #define t_dsptask struct _dsptask

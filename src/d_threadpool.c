@@ -574,6 +574,18 @@ void dsptaskqueue_reset(t_dsptaskqueue *x)
     }
 }
 
+static t_int *dsptaskqueue_doreset(t_int *w)
+{
+    t_dsptaskqueue *x = (t_dsptaskqueue *)w[1];
+    dsptaskqueue_reset(x);
+    return w + 2;
+}
+
+void dsp_add_reset(t_dsptaskqueue *x)
+{
+    dsp_add(dsptaskqueue_doreset, 1, x);
+}
+
 void dsptaskqueue_join(t_dsptaskqueue *x)
 {
     if (!d_threadpool || !d_threadpool->tp_n)
@@ -612,6 +624,18 @@ void dsptaskqueue_join(t_dsptaskqueue *x)
 #ifdef DEBUG_DSPTHREADS
     fprintf(stderr, "queue %p: end join\n", x);
 #endif
+}
+
+static t_int *dsptaskqueue_dojoin(t_int *w)
+{
+    t_dsptaskqueue *x = (t_dsptaskqueue *)w[1];
+    dsptaskqueue_join(x);
+    return w + 2;
+}
+
+void dsp_add_join(t_dsptaskqueue *x)
+{
+    dsp_add(dsptaskqueue_dojoin, 1, x);
 }
 
 /* ---------------------------- t_dsptask ----------------------------- */
