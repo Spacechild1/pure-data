@@ -461,11 +461,15 @@ static t_dsptask * dspthreadpool_pop(void)
 
 static void dsptask_run(t_dsptask *x, int index);
 
+void dspthread_setindex(int index);
+
 static void dspthread_dorun(int index)
 {
 #ifdef DEBUG_DSPTHREADS
     fprintf(stderr, "DSP thread %d: start\n", index);
 #endif
+    dspthread_setindex(index);
+
 #ifdef MSVC_INTERLOCKED
     while (d_threadpool->tp_running)
 #else
