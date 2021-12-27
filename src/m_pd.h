@@ -85,6 +85,10 @@ typedef unsigned __int64  uint64_t;
 #define MAXPDSTRING 1000        /* use this for anything you want */
 #define MAXPDARG 5              /* max number of args we can typecheck today */
 
+#ifndef PD_DSPTHREADS
+#define PD_DSPTHREADS 1
+#endif
+
 /* signed and unsigned integer types the size of a pointer:  */
 #if !defined(PD_LONGINTTYPE)
 #if defined(_WIN32) && defined(_WIN64)
