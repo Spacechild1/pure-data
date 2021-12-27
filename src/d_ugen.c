@@ -27,13 +27,13 @@ EXTERN_STRUCT _voutlet;
 
 void vinlet_dspprolog(struct _vinlet *x, t_signal **parentsigs,
     int myvecsize, int calcsize, int phase, int period, int frequency,
-    int downsample, int upsample,  int reblock, int switched);
+    int downsample, int upsample,  int reblock, int switched, int parallel);
 void voutlet_dspprolog(struct _voutlet *x, t_signal **parentsigs,
     int myvecsize, int calcsize, int phase, int period, int frequency,
-    int downsample, int upsample, int reblock, int switched);
+    int downsample, int upsample, int reblock, int switched, int parallel);
 void voutlet_dspepilog(struct _voutlet *x, t_signal **parentsigs,
     int myvecsize, int calcsize, int phase, int period, int frequency,
-    int downsample, int upsample, int reblock, int switched);
+    int downsample, int upsample, int reblock, int switched, int parallel);
 
 /* ---------------------------- t_signalcontext ----------------------------- */
 
@@ -92,8 +92,8 @@ struct _instanceugen
     t_signalcontext *u_signals; /* global signal context */
     struct _dspcontext *u_context; /* current DSP context */
 #if PD_DSPTHREADS
-    t_dsptaskqueue *u_dspqueue; /* toplevel DSP thread queue */
-    t_lockfree_stack u_clocks; /* only for the main queue */
+    t_dsptaskqueue *u_dspqueue; /* global DSP thread queue */
+    t_lockfree_stack u_clocks; /* deferred clocks */
 #endif
 };
 
@@ -191,6 +191,10 @@ overlapping and buffering to deal with vector size changes.  If we're switched
 but not reblocked, the inlet prolog is not needed, and the output epilog is
 ONLY run when the block is switched off; in this case the epilog code simply
 copies zeros to all signal outlets.
+
+Block~ also has a "parallel" method which will process the canvas in parallel.
+It will run asynchronously with all subsequent canvasses, unless it is joined
+by a parent canvas (with the "join" method).
 */
 
 static t_class *block_class;
@@ -211,6 +215,13 @@ typedef struct _block
     char x_switched;    /* true if we're acting as a a switch */
     char x_switchon;    /* true if we're switched on */
     char x_reblock;     /* true if inlets and outlets are reblocking */
+#if PD_DSPTHREADS
+    char x_parallel;    /* true if we are processing in parallel */
+    t_signalcontext *x_signals; /* signal context for parallel processing */
+    t_dsptask *x_task;  /* DSP task for parallel processing */
+    int x_taskonset;    /* beginning of parallel task in the chain */
+    int x_tasklength;   /* length of parallel task */
+#endif
     int x_upsample;     /* upsampling-factor */
     int x_downsample;   /* downsampling-factor */
     int x_return;       /* stop right after this block (for one-shots) */
@@ -228,8 +239,25 @@ static void *block_new(t_floatarg fvecsize, t_floatarg foverlap,
     x->x_frequency = 1;
     x->x_switched = 0;
     x->x_switchon = 1;
+#if PD_DSPTHREADS
+    x->x_parallel = 0;
+    x->x_signals = 0;
+    x->x_task = 0;
+    x->x_taskonset = 0;
+    x->x_tasklength = 0,
+#endif
     block_set(x, fvecsize, foverlap, fupsample);
     return (x);
+}
+
+static void block_free(t_block *x)
+{
+#if PD_DSPTHREADS
+    if (x->x_signals)
+        signalcontext_free(x->x_signals);
+    if (x->x_task)
+        dsptask_free(x->x_task);
+#endif
 }
 
 static void block_set(t_block *x, t_floatarg fcalcsize, t_floatarg foverlap,
@@ -331,7 +359,13 @@ static t_int *block_prolog(t_int *w)
     int phase = x->x_phase;
         /* if we're switched off, jump past the epilog code */
     if (!x->x_switchon)
+    {
+    #if PD_DSPTHREADS
+        if (x->x_parallel)
+            dsptask_skip(x->x_task);
+    #endif
         return (w + x->x_blocklength);
+    }
     if (phase)
     {
         phase++;
@@ -364,6 +398,35 @@ static t_int *block_epilog(t_int *w)
     else return (w + EPILOGCALL);
 }
 
+#if PD_DSPTHREADS
+
+static void block_parallel(t_block *x, t_floatarg f)
+{
+    int par = f != 0;
+    if (par != x->x_parallel)
+    {
+        x->x_parallel = par;
+        canvas_update_dsp();
+    }
+}
+
+static t_int *block_schedtask(t_int *w)
+{
+    t_block *x = (t_block *)w[1];
+    dsptask_sched(x->x_task);
+        /* skip the DSP chain performed by block_runtask(). */
+    return w + 2 + x->x_tasklength;
+}
+
+static void block_runtask(t_block *x)
+{
+    t_int *ip = THIS->u_dspchain + x->x_taskonset;
+    while (ip)
+        ip = (*(t_perfroutine)(*ip))(ip);
+}
+
+#endif /* PD_DSPTHREADS */
+
 static void block_dsp(t_block *x, t_signal **sp)
 {
     /* do nothing here */
@@ -371,12 +434,15 @@ static void block_dsp(t_block *x, t_signal **sp)
 
 void block_tilde_setup(void)
 {
-    block_class = class_new(gensym("block~"), (t_newmethod)block_new, 0,
+    block_class = class_new(gensym("block~"), (t_newmethod)block_new, (t_method)block_free,
             sizeof(t_block), CLASS_DEFAULT, A_DEFFLOAT, A_DEFFLOAT, A_DEFFLOAT, 0);
     class_addcreator((t_newmethod)switch_new, gensym("switch~"),
         A_DEFFLOAT, A_DEFFLOAT, A_DEFFLOAT, 0);
     class_addmethod(block_class, (t_method)block_set, gensym("set"),
         A_DEFFLOAT, A_DEFFLOAT, A_DEFFLOAT, 0);
+#if PD_DSPTHREADS
+    class_addmethod(block_class, (t_method)block_parallel, gensym("parallel"), A_FLOAT, 0);
+#endif
     class_addmethod(block_class, (t_method)block_dsp, gensym("dsp"), A_CANT, 0);
     class_addfloat(block_class, block_float);
     class_addbang(block_class, block_bang);
@@ -637,8 +703,12 @@ struct _dspcontext
     int dc_vecsize;         /* vector size, power of two */
     int dc_calcsize;        /* number of elements to calculate */
     char dc_toplevel;       /* true if "iosigs" is invalid. */
-    char dc_reblock;        /* true if we have to reblock inlets/outlets */
-    char dc_switched;       /* true if we're switched */
+    char dc_reblock;        /* true if we have to reblock inlets/outlets. */
+    char dc_switched;       /* true if we're switched. */
+    char dc_parallel;       /* true if we're parallel. */
+#if PD_DSPTHREADS
+    t_dsptaskqueue *dc_dspqueue; /* current DSP task queue */
+#endif
 };
 
 #define t_dspcontext struct _dspcontext
@@ -750,6 +820,12 @@ t_dspcontext *ugen_start_graph(int toplevel, t_signal **sp,
      * by block~ (see "parallel") or by signalcontext_push(). */
     dc->dc_signals = THIS->u_context ? THIS->u_context->dc_signals
         : THIS->u_signals;
+#if PD_DSPTHREADS
+    /* use parent DSP task queue by default. This might be overridden
+     * by block~ (see "join") or by dsptaskqueue_push(). */
+    dc->dc_dspqueue = THIS->u_context ? THIS->u_context->dc_dspqueue
+        : THIS->u_dspqueue;
+#endif
     THIS->u_context = dc;
     return (dc);
 }
@@ -843,19 +919,19 @@ static void ugen_doit(t_dspcontext *dc, t_ugenbox *u)
     t_sigoutconnect *oc;
     t_class *class = pd_class(&u->u_obj->ob_pd);
     int i, n;
-        /* suppress creating new signals for the outputs of signal
-        inlets and subpatches; except in the case we're an inlet and "blocking"
-        is set.  We don't yet know if a subcanvas will be "blocking" so there
+        /* suppress creating new signals for the outputs of signal inlets and
+        subpatches; except in the case we're an inlet and "reblock" or "parallel"
+        is set. We don't yet know if a subcanvas will be "blocking" so there
         we delay new signal creation, which will be handled by calling
         signal_setborrowed in the ugen_done_graph routine below. */
     int nonewsigs = (class == canvas_class ||
-        ((class == vinlet_class) && !(dc->dc_reblock)));
+        ((class == vinlet_class) && !(dc->dc_reblock || dc->dc_parallel)));
         /* when we encounter a subcanvas or a signal outlet, suppress freeing
-        the input signals as they may be "borrowed" for the super or sub
-        patch; same exception as above, but also if we're "switched" we
-        have to do a copy rather than a borrow.  */
+        the input signals as they may be "borrowed" for the super or sub patch;
+        same exception as above, but also if we're "switched" we have to do a
+        copy rather than a borrow. */
     int nofreesigs = (class == canvas_class || class == clone_class ||
-        ((class == voutlet_class) &&  !(dc->dc_reblock || dc->dc_switched)));
+        ((class == voutlet_class) && !(dc->dc_reblock || dc->dc_parallel || dc->dc_switched)));
     t_signal **insig, **outsig, **sig, *s1, *s2, *s3;
     t_ugenbox *u2;
 
@@ -885,10 +961,10 @@ static void ugen_doit(t_dspcontext *dc, t_ugenbox *u)
         *sig = uin->i_signal;
         newrefcount = --(*sig)->s_refcount;
             /* if the reference count went to zero, we free the signal now,
-            unless it's a subcanvas or outlet; these might keep the
-            signal around to send to objects connected to them.  In this
-            case we increment the reference count; the corresponding decrement
-            is in sig_makereusable(). */
+            unless it's a subcanvas or voutlet (except reblocked or parallel);
+            these might keep the signal around to send to objects connected
+            to them. In this case we increment the reference count;
+            the corresponding decrement is in sig_makereusable(). */
         if (nofreesigs)
             (*sig)->s_refcount++;
         else if (!newrefcount)
@@ -896,13 +972,15 @@ static void ugen_doit(t_dspcontext *dc, t_ugenbox *u)
     }
     for (sig = outsig, uout = u->u_out, i = u->u_nout; i--; sig++, uout++)
     {
-            /* similarly, for outlets of subcanvases we delay creating
-            them; instead we create "borrowed" ones so that the refcount
-            is known.  The subcanvas replaces the fake signal with one showing
-            where the output data actually is, to avoid having to copy it.
-            For any other object, we just allocate a new output vector;
-            since we've already freed the inputs the objects might get called
-            "in place." */
+            /* We delay creating outlets for subcanvasses or vinlets (except
+            reblocked or parallel); instead we create "borrowed" ones so that
+            the refcount is known. A subcanvas or vinlet will replace the fake
+            signal with one showing where the output data actually is, to avoid
+            having to copy it.
+            For any other objects, we just allocate a new output vector; since
+            we've already freed the inputs the objects might get called "in place."
+            For parallel processing, the signals for vinlet will be created in a
+            new signal context, so they are independent from the parent canvas. */
         if (nonewsigs)
         {
             *sig = uout->o_signal =
@@ -1007,7 +1085,7 @@ void ugen_done_graph(t_dspcontext *dc)
     int chainblockbegin;    /* DSP chain onset before block prolog code */
     int chainblockend;      /* and after block epilog code */
     int chainafterall;      /* and after signal outlet epilog */
-    int reblock = 0, switched;
+    int reblock = 0, switched, parallel;
     int downsample = 1, upsample = 1;
     /* debugging printout */
 
@@ -1081,6 +1159,28 @@ void ugen_done_graph(t_dspcontext *dc)
                 (downsample != 1) || (upsample != 1))
                     reblock = 1;
         switched = blk->x_switched;
+    #if PD_DSPTHREADS
+            /* always free existing DSP task! */
+        if (blk->x_task)
+        {
+            dsptask_free(blk->x_task);
+            blk->x_task = 0;
+        }
+        parallel = blk->x_parallel;
+        if (parallel && reblock && parent_context)
+        {
+            /* the code for reblocking is rather complicated and I am not
+             * ready to combine it with parallel processing, so I just
+             * just disallow it for now. After all, users can simply wrap
+             * a reblocked canvas in a non-reblocked one. Note that we do
+             * allow block~ on root canvases (which count as reblocked)
+             * because we do not have to care about inlets~ and outlets~. */
+            pd_error(blk, "reblocking + parallel processing not supported (yet)");
+            parallel = 0;
+        }
+    #else
+        parallel = 0;
+    #endif
     }
     else
     {
@@ -1092,20 +1192,21 @@ void ugen_done_graph(t_dspcontext *dc)
         phase = 0;
         if (!parent_context) reblock = 1;
         switched = 0;
+        parallel = 0;
     }
     dc->dc_reblock = reblock;
     dc->dc_switched = switched;
+    dc->dc_parallel = parallel;
     dc->dc_srate = srate;
     dc->dc_vecsize = vecsize;
     dc->dc_calcsize = calcsize;
 
-        /* if we're reblocking or switched, we now have to create output
-        signals to fill in for the "borrowed" ones we have now.  This
-        is also possibly true even if we're not blocked/switched, in
-        the case that there was a signal loop.  But we don't know this
-        yet.  */
+        /* if we're reblocking, switched or parallel, we now have to create
+        output signals to fill in for the "borrowed" ones we have now.
+        This is also possibly true even if we're not blocked/switched, in
+        the case that there was a signal loop. But we don't know this */
 
-    if (dc->dc_iosigs && (switched || reblock))
+    if (dc->dc_iosigs && (switched || reblock || parallel))
     {
         t_signal **sigp;
         for (i = 0, sigp = dc->dc_iosigs + dc->dc_ninlets; i < dc->dc_noutlets;
@@ -1124,7 +1225,8 @@ void ugen_done_graph(t_dspcontext *dc)
     }
 
     if (THIS->u_loud)
-        post("reblock %d, switched %d", reblock, switched);
+        post("reblock %d, switched %d, parallel %d",
+            reblock, switched, parallel);
 
         /* schedule prologs for inlets and outlets.  If the "reblock" flag
         is set, an inlet will put code on the DSP chain to copy its input
@@ -1143,11 +1245,11 @@ void ugen_done_graph(t_dspcontext *dc)
         if (pd_class(zz) == vinlet_class)
             vinlet_dspprolog((struct _vinlet *)zz,
                 dc->dc_iosigs, vecsize, calcsize, THIS->u_phase, period, frequency,
-                    downsample, upsample, reblock, switched);
+                    downsample, upsample, reblock, switched, parallel);
         else if (pd_class(zz) == voutlet_class)
             voutlet_dspprolog((struct _voutlet *)zz,
                 outsigs, vecsize, calcsize, THIS->u_phase, period, frequency,
-                    downsample, upsample, reblock, switched);
+                    downsample, upsample, reblock, switched, parallel);
     }
     chainblockbegin = THIS->u_dspchainsize;
 
@@ -1156,6 +1258,23 @@ void ugen_done_graph(t_dspcontext *dc)
         dsp_add(block_prolog, 1, blk);
         blk->x_chainonset = THIS->u_dspchainsize - 1;
     }
+#if PD_DSPTHREADS
+    if (parallel)
+    {
+            /* this canvas needs its own private signal context. */
+        if (!blk->x_signals)
+            blk->x_signals = signalcontext_new(); /* create lazily */
+        else
+            signalcontext_clear(blk->x_signals);
+        dc->dc_signals =  blk->x_signals;
+            /* create new DSP task for this canvas on the current queue */
+        blk->x_task = dsptask_new(dc->dc_dspqueue, (t_dsptaskfn)block_runtask, blk);
+            /* schedule task */
+        dsp_add(block_schedtask, 1, blk);
+        blk->x_taskonset = THIS->u_dspchainsize - 1;
+    }
+#endif /* PD_DSPTHREADS */
+
         /* Initialize for sorting */
     for (u = dc->dc_ugenlist; u; u = u->u_next)
     {
@@ -1207,6 +1326,18 @@ void ugen_done_graph(t_dspcontext *dc)
         break;   /* don't need to keep looking. */
     }
 
+#if PD_DSPTHREADS
+    if (parallel)
+    {
+            /* add sentinel */
+        dsp_add(dsp_done, 0);
+            /* save chain size, see block_pushtask(). */
+        blk->x_tasklength = THIS->u_dspchainsize - blk->x_taskonset - 1;
+        if (THIS->u_loud)
+            post("parallel DSP task length: %d", blk->x_tasklength);
+    }
+#endif /* PD_DSPTHREADS */
+
     if (blk && (reblock || switched))    /* add block DSP epilog */
         dsp_add(block_epilog, 1, blk);
     chainblockend = THIS->u_dspchainsize;
@@ -1222,7 +1353,7 @@ void ugen_done_graph(t_dspcontext *dc)
             if (iosigs) iosigs += dc->dc_ninlets;
             voutlet_dspepilog((struct _voutlet *)zz,
                 iosigs, vecsize, calcsize, THIS->u_phase, period, frequency,
-                    downsample, upsample, reblock, switched);
+                    downsample, upsample, reblock, switched, parallel);
         }
     }
 
