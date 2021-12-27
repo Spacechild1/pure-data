@@ -58,6 +58,7 @@ int sys_guisetportnumber;   /* if started from the GUI, this is the port # */
 int sys_nosleep = 0;  /* skip all "sleep" calls and spin instead */
 int sys_defeatrt;       /* flag to cancel real-time */
 t_symbol *sys_flags;    /* more command-line flags */
+int sys_dspthreads = 1;  /* number of DSP threads */
 
 const char *sys_guicmd;
 t_symbol *sys_libdir;
@@ -415,6 +416,10 @@ static char *(usagemessage[]) = {
 "-noaudio         -- suppress audio input and output (-nosound is synonym) \n",
 "-callback        -- use callbacks if possible\n",
 "-nocallback      -- use polling-mode (true by default)\n",
+#if PD_DSPTHREADS
+"-threads <n>     -- number of audio threads\n"
+"                    0: use all physical cores (default)\n",
+#endif
 "-listdev         -- list audio and MIDI devices\n",
 
 #ifdef USEAPI_OSS
@@ -1327,6 +1332,13 @@ int sys_argparse(int argc, const char **argv)
         {
             fprintf(stderr, "Pd compiled without realtime priority-support, ignoring '%s' flag\n", *argv);
             argc--; argv++;
+        }
+#endif
+#if PD_DSPTHREADS
+        else if (!strcmp(*argv, "-threads") && argc > 1)
+        {
+            sys_dspthreads = atoi(argv[1]);
+            argc -= 2; argv += 2;
         }
 #endif
         else if (!strcmp(*argv, "-sleep"))
