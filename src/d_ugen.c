@@ -17,6 +17,9 @@
 #include "s_stuff.h"
 
 #include <stdarg.h>
+#if PD_DSPTHREADS
+# include "s_sync.h"
+#endif
 
 extern t_class *vinlet_class, *voutlet_class, *canvas_class, *text_class;
 
@@ -48,6 +51,7 @@ struct _instanceugen
     struct _dspcontext *u_context;
 #if PD_DSPTHREADS
     t_dsptaskqueue *u_dspqueue; /* toplevel DSP thread queue */
+    t_lockfree_stack u_clocks; /* only for the main queue */
 #endif
 };
 
@@ -61,6 +65,7 @@ void d_ugen_newpdinstance(void)
     THIS->u_signals = 0;
 #if PD_DSPTHREADS
     THIS->u_dspqueue = dsptaskqueue_new();
+    lockfree_stack_init(&THIS->u_clocks);
 #endif
 }
 
@@ -71,6 +76,14 @@ void d_ugen_freepdinstance(void)
 #endif
     freebytes(THIS, sizeof(*THIS));
 }
+
+#if PD_DSPTHREADS
+void clock_defer(t_clock *x)
+{
+    /* push to main queue */
+    lockfree_stack_push(&THIS->u_clocks, x);
+}
+#endif
 
 t_int *zero_perform(t_int *w)   /* zero out a vector */
 {
@@ -395,18 +408,28 @@ void dsp_addv(t_perfroutine f, int n, t_int *vec)
     THIS->u_dspchainsize = newsize;
 }
 
+#if PD_DSPTHREADS
+void clock_dispatch(t_clock *x);
+void dspthread_setindex(int index);
+#endif
+
 void dsp_tick(void)
 {
     if (THIS->u_dspchain)
     {
         t_int *ip;
     #if PD_DSPTHREADS
+        t_clock *c;
+        dspthread_setindex(0); /* just to be sure */
         dsptaskqueue_reset(THIS->u_dspqueue);
     #endif
         for (ip = THIS->u_dspchain; ip; ) ip = (*(t_perfroutine)(*ip))(ip);
         THIS->u_phase++;
     #if PD_DSPTHREADS
         dsptaskqueue_join(THIS->u_dspqueue);
+        /* dispatch deferred clocks */
+        if ((c = lockfree_stack_release(&THIS->u_clocks)))
+            clock_dispatch(c);
     #endif
     }
 }

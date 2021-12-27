@@ -974,12 +974,16 @@ EXTERN void pd_setinstance(t_pdinstance *x);
 EXTERN void pdinstance_free(t_pdinstance *x);
 #endif /* PDINSTANCE */
 
-#if defined(PDTHREADS) && defined(PDINSTANCE)
 #ifdef _MSC_VER
-#define PERTHREAD __declspec(thread)
+#define THREADLOCAL __declspec(thread)
+#elif defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 201112L)
+#define THREADLOCAL _Thread_local
 #else
-#define PERTHREAD __thread
+#define THREADLOCAL __thread
 #endif /* _MSC_VER */
+
+#if PDTHREADS && defined(PDINSTANCE)
+#define PERTHREAD THREADLOCAL
 #else
 #define PERTHREAD
 #endif
