@@ -27,6 +27,7 @@ extern int sys_nosleep;
 
 int sys_usecsincelastsleep(void);
 int sys_sleepgrain;
+extern int sys_dspthreads;
 
 typedef void (*t_clockmethod)(void *client);
 
@@ -329,6 +330,7 @@ static void m_pollingscheduler(void)
 {
     sys_lock();
     sys_initmidiqueue();
+    sys_dspthreadpool_start(&sys_dspthreads, 0);
     while (!sys_quit)   /* outer loop runs once per tick */
     {
         sys_addhist(0);
@@ -381,6 +383,7 @@ static void m_pollingscheduler(void)
                 break;
         }
     }
+    sys_dspthreadpool_stop(0);
     sys_unlock();
 }
 
@@ -400,6 +403,7 @@ void sched_audio_callbackfn(void)
 static void m_callbackscheduler(void)
 {
     sys_initmidiqueue();
+    sys_dspthreadpool_start(&sys_dspthreads, 0);
     while (!sys_quit)
     {
         double timewas = pd_this->pd_systime;
@@ -418,6 +422,7 @@ static void m_callbackscheduler(void)
         if (sys_idlehook)
             sys_idlehook();
     }
+    sys_dspthreadpool_stop(0);
 }
 
 int m_mainloop(void)
