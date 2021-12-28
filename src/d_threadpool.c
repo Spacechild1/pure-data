@@ -462,6 +462,8 @@ static t_dsptask * dspthreadpool_pop(void)
 static void dsptask_run(t_dsptask *x, int index);
 
 void dspthread_setindex(int index);
+void mayer_init(void);
+void mayer_term(void);
 
 static void dspthread_dorun(int index)
 {
@@ -469,6 +471,7 @@ static void dspthread_dorun(int index)
     fprintf(stderr, "DSP thread %d: start\n", index);
 #endif
     dspthread_setindex(index);
+    mayer_init(); /* init FFT */
 
 #ifdef MSVC_INTERLOCKED
     while (d_threadpool->tp_running)
@@ -489,6 +492,8 @@ static void dspthread_dorun(int index)
         fprintf(stderr, "DSP thread %d: wake up\n", index);
     #endif
     }
+
+    mayer_term(); /* term FFT */
 #ifdef DEBUG_DSPTHREADS
     fprintf(stderr, "DSP thread %d: finish\n", index);
 #endif

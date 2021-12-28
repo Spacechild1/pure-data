@@ -21,6 +21,7 @@ for another, more permissive-sounding copyright notice.  -MSP
 /* ---------- Pd interface to OOURA FFT; imitate Mayer API ---------- */
 #include "m_pd.h"
 #include "m_imp.h"
+#include "s_stuff.h"
 
 #ifdef _WIN32
 # include <malloc.h> /* MSVC or mingw on windows */
@@ -30,17 +31,24 @@ for another, more permissive-sounding copyright notice.  -MSP
 # include <stdlib.h> /* BSDs for example */
 #endif
 
+#if PD_DSPTHREADS
+/* always thread-local! */
+#define FFT_PERTHREAD THREADLOCAL
+#else
+#define FFT_PERTHREAD PERTHREAD
+#endif
+
 #define FFTFLT double
 void cdft(int, int, FFTFLT *, int *, FFTFLT *);
 void rdft(int, int, FFTFLT *, int *, FFTFLT *);
 
 int ilog2(int n);
 
-static PERTHREAD int ooura_maxn;
-static PERTHREAD int *ooura_bitrev;
-static PERTHREAD int ooura_bitrevsize;
-static PERTHREAD FFTFLT *ooura_costab;
-static PERTHREAD FFTFLT *ooura_buffer;
+static FFT_PERTHREAD int ooura_maxn;
+static FFT_PERTHREAD int *ooura_bitrev;
+static FFT_PERTHREAD int ooura_bitrevsize;
+static FFT_PERTHREAD FFTFLT *ooura_costab;
+static FFT_PERTHREAD FFTFLT *ooura_buffer;
 
 static int ooura_init( int n)
 {
@@ -101,7 +109,7 @@ static void ooura_term( void)
 }
 
 /* -------- initialization and cleanup -------- */
-static PERTHREAD int mayer_refcount = 0;
+static FFT_PERTHREAD int mayer_refcount = 0;
 
 void mayer_init( void)
 {
