@@ -7,6 +7,7 @@
 /* changes and additions for FFTW3 by Thomas Grill                      */
 
 #include "m_pd.h"
+#include "s_stuff.h"
 #include <fftw3.h>
 
 int ilog2(int n);
@@ -147,14 +148,16 @@ static void rfftw_term(void)
     }
 }
 
-static int mayer_refcount = 0;
+#if PD_DSPTHREADS
+/* always thread-local! */
+static THREADLOCAL int mayer_refcount = 0;
+#else
+static PERTHREAD int mayer_refcount = 0;
+#endif
 
 void mayer_init(void)
 {
-    if (mayer_refcount++ == 0)
-    {
-        /* nothing to do */
-    }
+    mayer_refcount++;
 }
 
 void mayer_term(void)
