@@ -111,11 +111,16 @@ typedef unsigned __int64  uint64_t;
 # error invalid FLOATSIZE: must be 32 or 64
 #endif
 
-/* override for parallel processing support */
+/* externals may override this for parallel processing support.
+ * You have to use the CLASS_DEFAULT macro in class_new() and
+ * in your perform routine(s) you must only call API functions
+ * that are markes as THREADSAFE! */
 #ifndef PD_PARALLEL
-#define PD_PARALLEL 1
+#define PD_PARALLEL 0
 #endif
 
+/* used to mark API functions as thread-safe, meaning that they
+ * can be safely used in a perform routine. */
 #define THREADSAFE
 
 typedef PD_LONGINTTYPE t_int;       /* pointer-size integer */

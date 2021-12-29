@@ -392,15 +392,11 @@ EXTERN void inmidi_polyaftertouch(int portno,
 /* } jsarlo */
 EXTERN int sys_zoom_open;
 
-/* DSP task queue, for documentation see d_threadpool.c */
-#ifndef PD_DSPTHREADS
-#define PD_DSPTHREADS 1
-#endif
+/* DSP task queue */
+#if PD_DSPTHREADS
 
 EXTERN_STRUCT _dsptaskqueue;
 #define t_dsptaskqueue struct _dsptaskqueue
-
-#if PD_DSPTHREADS
 
 t_dsptaskqueue * dsptaskqueue_new(void);
 void dsptaskqueue_free(t_dsptaskqueue *x);
@@ -419,6 +415,7 @@ void dsptask_skip(t_dsptask *x);
 
 #endif /* PD_DSPTHREADS */
 
+/* DSP thread pool API, for documentation see d_threadpool.c */
 EXTERN int sys_havedspthreadpool(void);
 EXTERN int sys_dspthreadpool_start(int *numthreads, int external);
 EXTERN int sys_dspthreadpool_stop(int external);
