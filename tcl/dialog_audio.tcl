@@ -17,7 +17,7 @@ proc ::dialog_audio::apply {mytoplevel} {
     global audio_outdev1 audio_outdev2 audio_outdev3 audio_outdev4
     global audio_outchan1 audio_outchan2 audio_outchan3 audio_outchan4
     global audio_outenable1 audio_outenable2 audio_outenable3 audio_outenable4
-    global audio_sr audio_advance audio_callback audio_blocksize
+    global audio_sr audio_advance audio_callback audio_blocksize audio_threads
 
     pdsend "pd audio-dialog \
         $audio_indev1 \
@@ -39,7 +39,8 @@ proc ::dialog_audio::apply {mytoplevel} {
         $audio_sr \
         $audio_advance \
         $audio_callback \
-        $audio_blocksize"
+        $audio_blocksize \
+        $audio_threads"
 }
 
 proc ::dialog_audio::cancel {mytoplevel} {
@@ -102,7 +103,7 @@ proc ::dialog_audio::pdtk_audio_dialog {mytoplevel \
         inchan1 inchan2 inchan3 inchan4 \
         outdev1 outdev2 outdev3 outdev4 \
         outchan1 outchan2 outchan3 outchan4 sr advance multi callback \
-        longform blocksize} {
+        longform blocksize {threads 0}} {
     global audio_indev1 audio_indev2 audio_indev3 audio_indev4
     global audio_inchan1 audio_inchan2 audio_inchan3 audio_inchan4
     global audio_inenable1 audio_inenable2 audio_inenable3 audio_inenable4
@@ -112,7 +113,7 @@ proc ::dialog_audio::pdtk_audio_dialog {mytoplevel \
     global audio_sr audio_advance audio_callback audio_blocksize
     global audio_indevlist audio_outdevlist
     global pd_indev pd_outdev
-    global audio_longform
+    global audio_longform audio_threads
 
     set audio_indev1 $indev1
     set audio_indev2 $indev2
@@ -146,6 +147,8 @@ proc ::dialog_audio::pdtk_audio_dialog {mytoplevel \
     foreach {audio_advance audio_isfixedadvance} [::dialog_audio::isfixed $advance] {}
     foreach {audio_callback audio_isfixedcallback} [::dialog_audio::isfixed $callback] {}
     foreach {audio_blocksize audio_isfixedbs} [::dialog_audio::isfixed $blocksize] {}
+
+    set audio_threads $threads
 
     toplevel $mytoplevel -class DialogWindow
     wm withdraw $mytoplevel
@@ -202,12 +205,19 @@ proc ::dialog_audio::pdtk_audio_dialog {mytoplevel \
         $mytoplevel.settings.bsc.bs_popup config -state "disabled"
     }
 
-    if {$audio_isfixedcallback} {} else {
-        frame $mytoplevel.settings.callback
-        pack $mytoplevel.settings.callback -side bottom -fill x
-        checkbutton $mytoplevel.settings.callback.c_button -variable audio_callback \
+    # callbacks and audio threads
+    frame $mytoplevel.settings.misc
+    pack $mytoplevel.settings.misc -side bottom -fill x
+    if {!$audio_isfixedcallback} {
+        checkbutton $mytoplevel.settings.misc.c_button -variable audio_callback \
             -text [_ "Use callbacks"]
-        pack $mytoplevel.settings.callback.c_button
+        pack $mytoplevel.settings.misc.c_button
+        pack $mytoplevel.settings.misc.c_button -side left
+    }
+    if {$threads >= 0} {
+        label $mytoplevel.settings.misc.t_label -text [_ "Audio threads:"]
+        entry $mytoplevel.settings.misc.t_entry -textvariable audio_threads -width 4
+        pack $mytoplevel.settings.misc.t_entry $mytoplevel.settings.misc.t_label -side right
     }
 
     # input devices

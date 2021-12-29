@@ -73,6 +73,7 @@ typedef struct _audiosettings
     int a_advance;
     int a_callback;
     int a_blocksize;
+    int a_numthreads;
 } t_audiosettings;
 
 #define SENDDACS_NO 0           /* return values for sys_send_dacs() */
