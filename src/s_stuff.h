@@ -399,12 +399,17 @@ EXTERN int sys_zoom_open;
 EXTERN_STRUCT _dsptaskqueue;
 #define t_dsptaskqueue struct _dsptaskqueue
 
-t_dsptaskqueue * dsptaskqueue_new(void);
+t_dsptaskqueue * dsptaskqueue_new(t_canvas *owner);
 void dsptaskqueue_free(t_dsptaskqueue *x);
+void dsptaskqueue_update(t_dsptaskqueue *x);
+int dsptaskqueue_check(t_dsptaskqueue *x);
 void dsptaskqueue_reset(t_dsptaskqueue *x);
 void dsptaskqueue_join(t_dsptaskqueue *x);
 void dsp_add_reset(t_dsptaskqueue *x);
 void dsp_add_join(t_dsptaskqueue *x);
+
+int canvas_markthreadsafe(void);
+int canvas_isthreadsafe(t_canvas *x, int loud);
 
 EXTERN_STRUCT _dsptask;
 #define t_dsptask struct _dsptask
@@ -423,6 +428,8 @@ EXTERN int sys_havedspthreadpool(void);
 EXTERN int sys_dspthreadpool_start(int *numthreads, int external);
 EXTERN int sys_dspthreadpool_stop(int external);
 EXTERN int sys_dspthread_run(int index);
+
+EXTERN int sys_threadsafe; /* enable/disable thread-safety checks */
 
 struct _instancestuff
 {

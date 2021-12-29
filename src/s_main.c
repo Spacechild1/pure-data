@@ -57,6 +57,7 @@ int sys_hipriority = -1;    /* -1 = not specified; 0 = no; 1 = yes */
 int sys_guisetportnumber;   /* if started from the GUI, this is the port # */
 int sys_nosleep = 0;  /* skip all "sleep" calls and spin instead */
 int sys_defeatrt;       /* flag to cancel real-time */
+int sys_threadsafe = 1; /* only allow thread-safe DSP objects in parallel processing */
 t_symbol *sys_flags;    /* more command-line flags */
 
 const char *sys_guicmd;
@@ -1342,6 +1343,16 @@ int sys_argparse(int argc, const char **argv)
         {
             as.a_numthreads = atoi(argv[1]);
             argc -= 2; argv += 2;
+        }
+        else if (!strcmp(*argv, "-threadsafe"))
+        {
+            sys_threadsafe = 1;
+            argc--; argv++;
+        }
+        else if (!strcmp(*argv, "-nothreadsafe"))
+        {
+            sys_threadsafe = 0;
+            argc--; argv++;
         }
 #endif
         else if (!strcmp(*argv, "-sleep"))

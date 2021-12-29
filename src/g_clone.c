@@ -82,12 +82,59 @@ typedef struct _clone
     t_atom *x_argv;
     int x_phase;
     int x_startvoice;   /* number of first voice, 0 by default */
-    int x_suppressvoice; /* suppress voice number as $1 arg */
+    char x_suppressvoice; /* suppress voice number as $1 arg */
 #if PD_DSPTHREADS
-    int x_parallel;     /* process in parallel */
+    char x_parallel;     /* process in parallel */
+    char x_threadsafe;   /* are we thread-safe? */
     t_dsptaskqueue *x_dspqueue; /* DSP task queue */
 #endif
 } t_clone;
+
+#if PD_DSPTHREADS
+
+int obj_markthreadsafe(t_gobj *x, t_symbol *dspsym);
+
+    /* called by obj_markthreadsafe() */
+int clone_markthreadsafe(t_pd *z, t_symbol *dspsym)
+{
+    t_clone *x = (t_clone *)z;
+    int i;
+    x->x_threadsafe = 1;
+    for (i = 0; i < x->x_n; i++)
+    {
+        t_gobj *obj = (t_gobj *)x->x_vec[i].c_gl;
+        if (!obj_markthreadsafe(obj, dspsym))
+            x->x_threadsafe = 0; /* don't break! */
+    }
+    return x->x_threadsafe;
+}
+
+int obj_isthreadsafe(t_gobj *x, t_symbol *dspsym, int *limit);
+
+    /* called by obj_isthreadsafe() */
+int clone_isthreadsafe(t_pd *z, t_symbol *dspsym, int *limit)
+{
+    t_clone *x = (t_clone *)z;
+    if (x->x_threadsafe)
+        return 1;
+    else if (!limit)
+        return 0;
+    else
+    {
+            /* only search for the first offending canvas; the loop is
+             * necessary because of live editing and dynamic patching! */
+        int i;
+        for (i = 0; i < x->x_n; i++)
+        {
+            t_gobj *obj = (t_gobj *)x->x_vec[i].c_gl;
+            if (!obj_isthreadsafe(obj, dspsym, limit))
+                break;
+        }
+        return 0;
+    }
+}
+
+#endif /* PD_DSPTHREADS */
 
 int clone_match(t_pd *z, t_symbol *name, t_symbol *dir)
 {
@@ -417,6 +464,31 @@ static void clone_dsp(t_clone *x, t_signal **sp)
 #if PD_DSPTHREADS
     if (parallel)
     {
+        if (!x->x_dspqueue) /* create lazily */
+            x->x_dspqueue = dsptaskqueue_new(0);
+            /* check thread-safety; unlike block~ in ugen_done_graph(),
+             * we don't use dsptaskqueue_update() and dsptaskqueue_check()
+             * because we already have all the information we need. */
+        if (!x->x_threadsafe)
+        {
+                /* only search for the first offending canvas; the loop is
+                 * necessary because of live editing and dynamic patching! */
+            int i;
+            for (i = 0; i < x->x_n; i++)
+            {
+                if (!canvas_isthreadsafe(x->x_vec[i].c_gl, 1)) /* loud */
+                    break;
+            }
+                /* see also ugen_done_graph() */
+            pd_error(x, "clone: parallel processing not possible because "
+                "some DSP objects are not officially thread-safe! Start Pd with "
+                "with -nothreadsafe to circumvent this check (potentially dangerous!)");
+
+            parallel = 0;
+        }
+    }
+    if (parallel)
+    {
             /* Every child abstraction gets its own DSP task. Unlike block~ + "parallel",
              * cloned abstractions are not aware that they are being processed in parallel.
              * Since all DSP tasks are joined by us, there is no need for double buffering
@@ -429,8 +501,6 @@ static void clone_dsp(t_clone *x, t_signal **sp)
              * our output signals. */
         int blocksize = sp[0]->s_n;
         t_dsptaskqueue *oldqueue;
-        if (!x->x_dspqueue)
-            x->x_dspqueue = dsptaskqueue_new();
             /* push our queue to the current DSP context */
         oldqueue = dsptaskqueue_push(x->x_dspqueue);
             /* reset queue */
@@ -552,6 +622,7 @@ static void *clone_new(t_symbol *s, int argc, t_atom *argv)
     x->x_suppressvoice = 0;
 #if PD_DSPTHREADS
     x->x_parallel = 0;
+    x->x_threadsafe = !sys_threadsafe; /* see canvas_new() */
     x->x_dspqueue = 0;
 #endif
     clone_voicetovis = -1;

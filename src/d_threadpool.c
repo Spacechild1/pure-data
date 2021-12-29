@@ -537,14 +537,20 @@ struct _dsptaskqueue
     atomic_int dq_remaining;
 #endif
     t_fast_semaphore dq_sem;
+    t_canvas *dq_owner; /* canvas or NULL */
+    char dq_threadsafe;
+    char dq_warned;
 };
 
-t_dsptaskqueue * dsptaskqueue_new(void)
+t_dsptaskqueue * dsptaskqueue_new(t_canvas *owner)
 {
     t_dsptaskqueue *x = (t_dsptaskqueue *)getbytes(sizeof(t_dsptaskqueue));
     x->dq_numtasks = 0;
     x->dq_remaining = 0;
     fast_semaphore_init(&x->dq_sem);
+    x->dq_owner = owner;
+    x->dq_threadsafe = 0;
+    x->dq_warned = 0;
     return x;
 }
 
@@ -559,6 +565,38 @@ void dsptaskqueue_free(t_dsptaskqueue *x)
     {
         fast_semaphore_destroy(&x->dq_sem);
         freebytes(x, sizeof(t_dsptaskqueue));
+    }
+}
+
+    /* check if our sub-tree is thread-safe and cache the result.
+     * Called once per DSP graph update in ugen_start() and
+     * ugen_done_graph(); see also canvas_markthreadsafe(). */
+void dsptaskqueue_update(t_dsptaskqueue *x)
+{
+    x->dq_threadsafe = sys_threadsafe ?
+        canvas_isthreadsafe(x->dq_owner, 0) : 1; /* silent! */
+    x->dq_warned = 0;
+}
+
+    /* check if our sub-tree is thread-safe, using the cached result
+     * of dsptaskqueue_update() above. Called by block~ objects
+     * associated with this queue, see ugen_done_graph(). */
+int dsptaskqueue_check(t_dsptaskqueue *x)
+{
+    if (x->dq_threadsafe)
+        return 1;
+    else
+    {
+    #if 1
+        if (!x->dq_warned) /* only warn once per DSP task queue */
+    #endif
+        {
+            if (canvas_isthreadsafe(x->dq_owner, 1)) /* loud */
+                /* dq_threadsafe should have been true */
+                bug("dsptaskqueue_check");
+            x->dq_warned = 1;
+        }
+        return 0;
     }
 }
 
