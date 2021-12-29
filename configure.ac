@@ -287,11 +287,6 @@ AS_IF([test x$debug = xyes],[
     PD_CPPFLAGS="-DNDEBUG $PD_CPPFLAGS"
 ])
 
-##### macOS version min #####
-AS_IF([test "x$macos_version_min" != "x"],[
-    PD_CFLAGS="-mmacosx-version-min=$macos_version_min $PD_CFLAGS"
-])
-
 #########################################
 ##### Configure Options #####
 
@@ -312,6 +307,20 @@ AM_CONDITIONAL(LIBPD_UTILS, test x$enable_libpd_utils = xyes)
 AM_CONDITIONAL(LIBPD_EXTRA, test x$enable_libpd_extra = xyes)
 AM_CONDITIONAL(LIBPD_MULTIINSTANCE, test x$enable_libpd_instance = xyes)
 AM_CONDITIONAL(LIBPD_NO_SETLOCALE, test x$enable_libpd_setlocale = xno)
+
+##### parallel processing support #####
+AC_ARG_ENABLE([parallel],
+    [AS_HELP_STRING([--disable-parallel], [disable parallel processing support])],
+    [parallel=$enableval], [parallel=yes])
+AS_IF([test x$parallel = xyes],[
+    PD_CPPFLAGS="-DPD_DSPTHREADS=1 -DPD_PARALLEL=1 $PD_CPPFLAGS"
+    AS_IF([test x"$MACOSX" = x"yes"], [
+        # for thread local storage support
+        macos_version_min=10.9
+    ])
+],[
+    PD_CPPFLAGS="-DPD_DSPTHREADS=0 -DPD_PARALLEL=0 $PD_CPPFLAGS"
+])
 
 ##### Universal/multi architecture build on macOS #####
 PD_CHECK_UNIVERSAL(ARCH, [universal=yes], [universal=no])
@@ -560,6 +569,11 @@ AS_IF([test "x${enable_libpd}" = "xyes"],[
     AS_IF([test "x${libpd_}" != "x"],[ libpd="${libpd} ( ${libpd_})"])
 ],[
     libpd="no"
+])
+
+##### macOS version min #####
+AS_IF([test "x$macos_version_min" != "x"],[
+    PD_CFLAGS="-mmacosx-version-min=$macos_version_min $PD_CFLAGS"
 ])
 
 # pass common flags via @PD_*@ AM variables for use in Makefiles
