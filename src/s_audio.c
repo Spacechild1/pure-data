@@ -47,6 +47,9 @@ static t_audiosettings audio_nextsettings;
 
 void sched_audio_callbackfn(void);
 void sched_reopenmeplease(void);
+#if PD_DSPTHREADS
+int sys_defnumdspthreads(void);
+#endif
 
 int audio_isopen(void)
 {
@@ -239,6 +242,11 @@ void sys_get_audio_settings(t_audiosettings *a)
             audio_nextsettings.a_choutdevvec[0] = SYS_DEFAULTCH;
         audio_nextsettings.a_advance = DEFAULTADVANCE;
         audio_nextsettings.a_blocksize = DEFDACBLKSIZE;
+    #if PD_DSPTHREADS
+        audio_nextsettings.a_numthreads = 0; /* default */
+    #else
+        audio_nextsettings.a_numthreads = -1; /* no threads */
+    #endif
         initted = 1;
     }
     *a = audio_nextsettings;
@@ -274,6 +282,14 @@ void sys_set_audio_settings(t_audiosettings *a)
     a->a_blocksize = 1 << ilog2(a->a_blocksize);
     if (a->a_blocksize < DEFDACBLKSIZE || a->a_blocksize > MAXBLOCKSIZE)
         a->a_blocksize = DEFDACBLKSIZE;
+#if PD_DSPTHREADS
+        /* 0: default number of threads. */
+    if (a->a_numthreads <= 0)
+        a->a_numthreads = sys_defnumdspthreads();
+#else
+        /* -1 tells the GUI that PD_DSPTHREADS is disabled. */
+    a->a_numthreads = -1;
+#endif
 
     audio_make_sane(&a->a_noutdev, a->a_outdevvec,
         &a->a_nchoutdev, a->a_choutdevvec, MAXAUDIOOUTDEV);
@@ -296,6 +312,9 @@ void sys_close_audio(void)
     }
     if (!audio_isopen())
         return;
+
+    sys_dspthreadpool_stop(0);
+
 #ifdef USEAPI_PORTAUDIO
     if (sys_audioapiopened == API_PORTAUDIO)
         pa_close_audio();
@@ -369,6 +388,9 @@ void sys_reopen_audio(void)
     audio_compact_and_count_channels(&as.a_noutdev, as.a_outdevvec,
         as.a_choutdevvec, &totaloutchans, MAXAUDIOOUTDEV);
     sys_setchsr(totalinchans, totaloutchans, as.a_srate);
+    sys_dspthreadpool_start(&as.a_numthreads, 0);
+        /* save actual (validated) thread count. */
+    audio_nextsettings.a_numthreads = as.a_numthreads;
     if (!as.a_nindev && !as.a_noutdev)
     {
         sched_set_using_audio(SCHED_AUDIO_NONE);
@@ -457,7 +479,7 @@ void sys_reopen_audio(void)
             (as.a_callback ? SCHED_AUDIO_CALLBACK : SCHED_AUDIO_POLL));
         audio_callback_is_open = as.a_callback;
     }
-    sys_vgui("set pd_whichapi %d\n",  sys_audioapiopened);
+    sys_vgui("set pd_whichapi %d\n", sys_audioapiopened);
 }
 
 int sys_send_dacs(void)
@@ -646,7 +668,7 @@ void glob_audio_properties(t_pd *dummy, t_floatarg flongform)
 "pdtk_audio_dialog %%s \
 %d %d %d %d %d %d %d %d \
 %d %d %d %d %d %d %d %d \
-%s%d %d %d %s%d %d %s%d\n",
+%s%d %d %d %s%d %d %s%d %d\n",
         as.a_indevvec[0], as.a_indevvec[1],
             as.a_indevvec[2], as.a_indevvec[3],
         as.a_chindevvec[0], as.a_chindevvec[1],
@@ -655,9 +677,10 @@ void glob_audio_properties(t_pd *dummy, t_floatarg flongform)
             as.a_outdevvec[2], as.a_outdevvec[3],
         as.a_choutdevvec[0], as.a_choutdevvec[1],
             as.a_choutdevvec[2], as.a_choutdevvec[3],
-        audio_isfixedsr(as.a_api)?"!":"", as.a_srate, as.a_advance, canmulti,
-        cancallback?"":"!", as.a_callback,
-        (flongform != 0), audio_isfixedblocksize(as.a_api)?"!":"", as.a_blocksize);
+        audio_isfixedsr(as.a_api)?"!":"", as.a_srate, as.a_advance,
+        canmulti, cancallback?"":"!", as.a_callback, (flongform != 0),
+        audio_isfixedblocksize(as.a_api)?"!":"", as.a_blocksize,
+        as.a_numthreads);
     gfxstub_deleteforkey(0);
     gfxstub_new(&glob_pdobject, (void *)glob_audio_properties, buf);
 }
@@ -672,6 +695,7 @@ void glob_audio_dialog(t_pd *dummy, t_symbol *s, int argc, t_atom *argv)
     as.a_advance = atom_getfloatarg(17, argc, argv);
     as.a_callback = atom_getfloatarg(18, argc, argv);
     as.a_blocksize = atom_getfloatarg(19, argc, argv);
+    as.a_numthreads = atom_getfloatarg(20, argc, argv);
 
     for (i = 0; i < 4; i++)
     {
