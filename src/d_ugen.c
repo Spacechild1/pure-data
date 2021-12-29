@@ -106,7 +106,7 @@ void d_ugen_newpdinstance(void)
     THIS->u_dspchainsize = 0;
     THIS->u_signals = signalcontext_new();
 #if PD_DSPTHREADS
-    THIS->u_dspqueue = dsptaskqueue_new();
+    THIS->u_dspqueue = dsptaskqueue_new(0);
     lockfree_stack_init(&THIS->u_clocks);
 #endif
 }
@@ -218,6 +218,7 @@ typedef struct _block
 #if PD_DSPTHREADS
     char x_parallel;    /* true if we are processing in parallel */
     char x_join;        /* true if this canvas should join DSP tasks of subpatches */
+    t_canvas *x_owner;  /* owning canvas */
     t_signalcontext *x_signals; /* signal context for parallel processing */
     t_dsptask *x_task;  /* DSP task for parallel processing */
     int x_taskonset;    /* beginning of parallel task in the chain */
@@ -246,6 +247,7 @@ static void *block_new(t_floatarg fvecsize, t_floatarg foverlap,
 #if PD_DSPTHREADS
     x->x_parallel = 0;
     x->x_join = 0;
+    x->x_owner = canvas_getcurrent();
     x->x_signals = 0;
     x->x_task = 0;
     x->x_taskonset = 0;
@@ -446,7 +448,7 @@ static void block_join(t_block *x, t_floatarg f)
         x->x_join = join;
         if (x->x_dspqueue)
             dsptaskqueue_release(x->x_dspqueue);
-        x->x_dspqueue = join ? dsptaskqueue_new() : 0;
+        x->x_dspqueue = join ? dsptaskqueue_new(x->x_owner) : 0;
         canvas_update_dsp();
     }
 }
@@ -756,6 +758,7 @@ struct _dspcontext
 
 #define t_dspcontext struct _dspcontext
 
+    /* for clone object, see clone_dsp() */
 #if PD_DSPTHREADS
 
 t_dsptaskqueue * dsptask_getqueue(t_dsptask *x);
@@ -863,6 +866,12 @@ void ugen_start(void)
     THIS->u_dspchain = (t_int *)getbytes(sizeof(*THIS->u_dspchain));
     THIS->u_dspchain[0] = (t_int)dsp_done;
     THIS->u_dspchainsize = 1;
+#if PD_DSPTHREADS
+        /* first check and mark canvas tree */
+    canvas_markthreadsafe();
+        /* then update toplevel queue */
+    dsptaskqueue_update(THIS->u_dspqueue);
+#endif
     if (THIS->u_context) bug("ugen_start");
 }
 
@@ -1305,6 +1314,18 @@ void ugen_done_graph(t_dspcontext *dc)
              * preventing any kind of parallelism. */
             logpost(blk, PD_NORMAL, "block~: warning: using 'parallel' "
                 "and 'join' in the same canvas has no effect.");
+        }
+            /* first update queue */
+        if (join)
+            dsptaskqueue_update(blk->x_dspqueue);
+            /* then check if we can safely run in parallel */
+        if (parallel && !dsptaskqueue_check(dc->dc_dspqueue))
+        {
+                /* see also clone_dsp() */
+            pd_error(blk, "block~: parallel processing not possible because "
+                "some DSP objects are not officially thread-safe! Start Pd with "
+                "with -nothreadsafe to circumvent this check (potentially dangerous!)");
+            parallel = 0;
         }
     #else
         parallel = 0;
