@@ -597,6 +597,10 @@ void sys_loadpreferences(const char *filename, int startingup)
     else if (sys_getpreference("blocksize", prefbuf, MAXPDSTRING))
         sscanf(prefbuf, "%d", &as.a_blocksize);
 #endif
+#if PD_DSPTHREADS
+    if (sys_getpreference("threads", prefbuf, MAXPDSTRING))
+        sscanf(prefbuf, "%d", &as.a_numthreads);
+#endif
     sys_set_audio_settings(&as);
 
         /* load MIDI preferences */
@@ -750,6 +754,11 @@ void sys_savepreferences(const char *filename)
 
     sprintf(buf1, "%d", as.a_blocksize);
     sys_putpreference("audioblocksize", buf1);
+
+#if PD_DSPTHREADS
+    sprintf(buf1, "%d", as.a_numthreads);
+    sys_putpreference("threads", buf1);
+#endif
 
         /* MIDI settings */
     sprintf(buf1, "%d", sys_midiapi);
