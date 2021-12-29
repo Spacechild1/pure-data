@@ -68,9 +68,6 @@ AS_CASE([$host],
 
         # a set of search paths are used on macOS in s_inter.c
         wish="default search paths"
-
-        # required for dlopen & weak linking for older OSX version support
-        CFLAGS="-mmacosx-version-min=10.6 $CFLAGS"
     ],[
         platform=iOS
         locales=no
@@ -300,6 +297,28 @@ AM_CONDITIONAL(LIBPD_UTILS, test x$enable_libpd_utils = xyes)
 AM_CONDITIONAL(LIBPD_EXTRA, test x$enable_libpd_extra = xyes)
 AM_CONDITIONAL(LIBPD_MULTIINSTANCE, test x$enable_libpd_instance = xyes)
 AM_CONDITIONAL(LIBPD_NO_SETLOCALE, test x$enable_libpd_setlocale = xno)
+
+##### parallel processing support #####
+AC_ARG_ENABLE([parallel],
+    [AS_HELP_STRING([--disable-parallel], [disable parallel processing support])],
+    [parallel=$enableval], [parallel=yes])
+AS_IF([test x$enable_parallel = xyes],[
+    CPPFLAGS="-DPD_DSPTHREADS=1 -DPD_PARALLEL=1 $CPPFLAGS"
+],[
+    CPPFLAGS="-DPD_DSPTHREADS=0 -DPD_PARALLEL=0 $CPPFLAGS"
+])
+
+#### MACOSX version ####
+AS_IF([test x$MACOSX = xyes],[
+    AS_IF([[test x$enable_libpd_instance = xyes] || [test x$enable_parallel = xyes]],[
+        # required for thread local storage support
+        MACOSX_VERSION_MIN=10.9
+    ],[
+        # required for dlopen & weak linking for older OSX version support
+        MACOSX_VERSION_MIN=10.6
+    ])
+    CFLAGS="-mmacosx-version-min=$MACOSX_VERSION_MIN $CFLAGS"
+])
 
 ##### Universal/multi architecture build on macOS #####
 PD_CHECK_UNIVERSAL(ARCH, [universal=yes], [universal=no])

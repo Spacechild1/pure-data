@@ -12,6 +12,10 @@
 
 #if PD_DSPTHREADS
 
+#if !PD_PARALLEL
+# error PD_DSPTHREADS requires PD_PARALLEL!
+#endif
+
 #include "s_sync.h"
 
 #include <pthread.h>
