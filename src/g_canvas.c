@@ -500,6 +500,12 @@ t_canvas *canvas_new(void *dummy, t_symbol *sel, int argc, t_atom *argv)
     canvas_dosetbounds(x, xloc, yloc, xloc + width, yloc + height);
     x->gl_owner = owner;
     x->gl_isclone = 0;
+#if PD_DSPTHREADS
+        /* if started with -nothreadsafe, we pretend to be thread-safe. */
+    x->gl_threadsafe = !sys_threadsafe;
+#else
+    x->gl_threadsafe = 0;
+#endif
     x->gl_name = (*s->s_name ? s :
         (THISGUI->i_newfilename ? THISGUI->i_newfilename : gensym("Pd")));
     canvas_bind(x);
@@ -1334,6 +1340,132 @@ void ugen_add(t_dspcontext *dc, t_object *x);
 void ugen_connect(t_dspcontext *dc, t_object *x1, int outno,
     t_object *x2, int inno);
 void ugen_done_graph(t_dspcontext *dc);
+
+#if PD_DSPTHREADS
+
+int clone_isthreadsafe(t_pd *x, t_symbol *dspsym, int *limit);
+
+    /* also called by clone_isthreadsafe() */
+int obj_isthreadsafe(t_gobj *x, t_symbol *dspsym, int *limit)
+{
+    if (x->g_pd == canvas_class)
+    {
+        t_canvas *c = (t_canvas *)x;
+            /* -threadsafe -> use cached result of canvas_markthreadsafe();
+             * -nothreadsafe -> always true, see canvas_new(). */
+        if (c->gl_threadsafe)
+            return 1;
+        else if (!limit)
+            return 0;
+        else /* find offending objects */
+        {
+            t_canvas *canvas = (t_canvas *)x;
+            t_gobj *y;
+            for (y = canvas->gl_list; y && (*limit > 0); y = y->g_next)
+                obj_isthreadsafe(y, dspsym, limit);
+            return 0;
+        }
+    }
+    else if (x->g_pd == clone_class)
+        return clone_isthreadsafe(&x->g_pd, dspsym, limit);
+    else
+    {       /* zgetfn() comes last because it's the most expensive check */
+        if (x->g_pd->c_patchable && !x->g_pd->c_threadsafe
+            && zgetfn(&x->g_pd, dspsym))
+        {
+                /* LATER get rid of duplicate warnings for the same class */
+            if (limit && *limit > 0)
+            {
+                logpost(x, PD_NORMAL, "warning: %s is not thread-safe!",
+                    class_getname(x->g_pd));
+                if (--(*limit) == 0) /* hit limit */
+                    logpost(0, PD_NORMAL, "...");
+            }
+            return 0;
+        } else
+            return 1;
+    }
+}
+
+#define THREADSAFE_WARN_MAX 10
+
+    /* check if all DSP objects starting at the given canvas
+     * are thread-safe; if 'x' is NULL, check all root canvases. */
+int canvas_isthreadsafe(t_canvas *x, int loud)
+{
+    t_symbol *dspsym = gensym("dsp");
+    int limit = THREADSAFE_WARN_MAX;
+    if (x)
+        return obj_isthreadsafe((t_gobj *)x, dspsym, loud ? &limit : 0);
+    else /* root canvases */
+    {
+        int threadsafe = 1;
+        t_canvas *y;
+        for (y = pd_getcanvaslist(); y; y = y->gl_next)
+        {
+            if (!obj_isthreadsafe((t_gobj *)y, dspsym, loud ? &limit : 0))
+            {
+                threadsafe = 0;
+                if (!loud || !limit)
+                    break;
+            }
+        }
+        return threadsafe;
+    }
+}
+
+int clone_markthreadsafe(t_pd *x, t_symbol *dspsym);
+
+    /* also called by clone_markthreadsafe() */
+int obj_markthreadsafe(t_gobj *x, t_symbol *dspsym)
+{
+    if (x->g_pd == canvas_class)
+    {
+        t_canvas *c = (t_canvas *)x;
+        t_gobj *y;
+        c->gl_threadsafe = 1;
+        for (y = c->gl_list; y; y = y->g_next)
+        {
+            if (!obj_markthreadsafe(y, dspsym))
+                c->gl_threadsafe = 0; /* don't break! */
+        }
+    #if 0
+        post("canvas %p (parent: %p) threadsafe: %d",
+            c, c->gl_owner, c->gl_threadsafe);
+    #endif
+        return c->gl_threadsafe;
+    }
+    else if (x->g_pd == clone_class)
+        return clone_markthreadsafe(&x->g_pd, dspsym);
+    else /* zgetfn() comes last because it's the most expensive check */
+        return !(x->g_pd->c_patchable && !x->g_pd->c_threadsafe
+            && zgetfn(&x->g_pd, dspsym));
+}
+
+    /* traverse canvas tree and mark every sub-tree (depth first).
+     * This mitigates O(n^2) complexity when calling canvas_isthreadsafe()
+     * repeatedly via dsptaskqueue_update() and dsptaskqueue_check(). */
+int canvas_markthreadsafe(void)
+{
+        /* when started with -nothreadsafe, gl_threadsafe will always
+         * be true, see canvas_new() and clone_new(). */
+    if (!sys_threadsafe)
+        return 1;
+    else
+    {
+        t_symbol *dspsym = gensym("dsp");
+        int threadsafe = 1;
+        t_canvas *y;
+        for (y = pd_getcanvaslist(); y; y = y->gl_next)
+        {
+            if (!obj_markthreadsafe((t_gobj *)y, dspsym))
+                threadsafe = 0; /* don't break! */
+        }
+        return threadsafe;
+    }
+}
+
+#endif /* PD_DSPTHREADS */
 
     /* schedule one canvas for DSP.  This is called below for all "root"
     canvases, but is also called from the "dsp" method for sub-
