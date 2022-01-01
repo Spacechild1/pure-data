@@ -1,4 +1,4 @@
-#N canvas 678 110 763 809 12;
+#N canvas 642 18 763 809 12;
 #X declare -stdpath ./;
 #X floatatom 189 308 5 36 144 0 - - - 0;
 #X obj 189 330 t b f;
@@ -11,15 +11,15 @@
 #X msg 297 450 this \$1;
 #X floatatom 306 477 5 36 144 0 - - - 0;
 #X msg 306 499 set \$1;
-#X msg 110 377 vis 5 1;
-#X msg 47 376 vis 5 0;
+#X msg 124 346 vis 5 1;
+#X msg 61 345 vis 5 0;
 #X floatatom 315 526 5 36 144 0 - - - 0;
 #X msg 315 548 all \$1;
 #X text 535 728 updated for Pd version 0.47;
 #X text 384 585 creation arguments:;
 #X text 55 590 click to open ->;
 #X text 43 612 (first copy only);
-#X text 57 333 open or close copy number 5:, f 14;
+#X text 62 305 open or close copy number 5:, f 14;
 #X text 239 312 A list beginning with a number dispatches the rest
 of the list as a message, f 41;
 #X text 352 372 "next" forwards a message to the next instance (incrementing
@@ -59,6 +59,14 @@ abstraction name and the number of voices., f 58;
 #X obj 189 426 pack f f;
 #X listbox 189 458 7 0 0 0 - - - 0;
 #X obj 548 17 declare -stdpath ./;
+#X msg 51 554 parallel \$1;
+#X obj 51 529 tgl 15 0 empty empty empty 17 7 0 10 #fcfcfc #000000
+#000000 0 1;
+#X text 50 479 process copies in parallel to utilize more CPU cores.
+, f 20;
+#X msg 270 651 \; pd dsp \$1;
+#X obj 270 628 tgl 15 0 empty empty empty 17 7 0 10 #fcfcfc #000000
+#000000 0 1;
 #X connect 0 0 1 0;
 #X connect 1 0 2 0;
 #X connect 1 1 35 1;
@@ -80,3 +88,6 @@ abstraction name and the number of voices., f 58;
 #X connect 30 0 32 1;
 #X connect 35 0 36 0;
 #X connect 36 0 30 0;
+#X connect 38 0 30 0;
+#X connect 39 0 38 0;
+#X connect 42 0 41 0;
