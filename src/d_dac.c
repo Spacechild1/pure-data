@@ -111,7 +111,7 @@ static void dac_free(t_dac *x)
 static void dac_setup(void)
 {
     dac_class = class_new(gensym("dac~"), (t_newmethod)dac_new,
-        (t_method)dac_free, sizeof(t_dac), 0, A_GIMME, 0);
+        (t_method)dac_free, sizeof(t_dac), CLASS_DEFAULT, A_GIMME, 0);
     CLASS_MAINSIGNALIN(dac_class, t_dac, x_f);
     class_addmethod(dac_class, (t_method)dac_dsp, gensym("dsp"), A_CANT, 0);
     class_addmethod(dac_class, (t_method)dac_set, gensym("set"), A_GIMME, 0);
@@ -181,7 +181,7 @@ static void adc_free(t_adc *x)
 static void adc_setup(void)
 {
     adc_class = class_new(gensym("adc~"), (t_newmethod)adc_new,
-        (t_method)adc_free, sizeof(t_adc), 0, A_GIMME, 0);
+        (t_method)adc_free, sizeof(t_adc), CLASS_DEFAULT, A_GIMME, 0);
     class_addmethod(adc_class, (t_method)adc_dsp, gensym("dsp"), A_CANT, 0);
     class_addmethod(adc_class, (t_method)adc_set, gensym("set"), A_GIMME, 0);
     class_sethelpsymbol(adc_class, gensym("adc~_dac~"));

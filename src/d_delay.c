@@ -163,7 +163,7 @@ static void sigdelwrite_setup(void)
 {
     sigdelwrite_class = class_new(gensym("delwrite~"),
         (t_newmethod)sigdelwrite_new, (t_method)sigdelwrite_free,
-        sizeof(t_sigdelwrite), 0, A_DEFSYM, A_DEFFLOAT, 0);
+        sizeof(t_sigdelwrite), CLASS_DEFAULT, A_DEFSYM, A_DEFFLOAT, 0);
     CLASS_MAINSIGNALIN(sigdelwrite_class, t_sigdelwrite, x_f);
     class_addmethod(sigdelwrite_class, (t_method)sigdelwrite_dsp,
         gensym("dsp"), A_CANT, 0);
@@ -263,7 +263,7 @@ static void sigdelread_setup(void)
 {
     sigdelread_class = class_new(gensym("delread~"),
         (t_newmethod)sigdelread_new, 0,
-        sizeof(t_sigdelread), 0, A_DEFSYM, A_DEFFLOAT, 0);
+        sizeof(t_sigdelread), CLASS_DEFAULT, A_DEFSYM, A_DEFFLOAT, 0);
     class_addmethod(sigdelread_class, (t_method)sigdelread_dsp,
         gensym("dsp"), A_CANT, 0);
     class_addfloat(sigdelread_class, (t_method)sigdelread_float);
@@ -368,7 +368,7 @@ static void sigvd_dsp(t_sigvd *x, t_signal **sp)
 static void sigvd_setup(void)
 {
     sigvd_class = class_new(gensym("delread4~"), (t_newmethod)sigvd_new, 0,
-        sizeof(t_sigvd), 0, A_DEFSYM, 0);
+        sizeof(t_sigvd), CLASS_DEFAULT, A_DEFSYM, 0);
     class_addcreator((t_newmethod)sigvd_new, gensym("vd~"), A_DEFSYM, 0);
     class_addmethod(sigvd_class, (t_method)sigvd_dsp, gensym("dsp"), A_CANT, 0);
     CLASS_MAINSIGNALIN(sigvd_class, t_sigvd, x_f);

@@ -452,7 +452,7 @@ fail:
 void clone_setup(void)
 {
     clone_class = class_new(gensym("clone"), (t_newmethod)clone_new,
-        (t_method)clone_free, sizeof(t_clone), CLASS_NOINLET, A_GIMME, 0);
+        (t_method)clone_free, sizeof(t_clone), CLASS_THREADSAFE | CLASS_NOINLET, A_GIMME, 0);
     class_addmethod(clone_class, (t_method)clone_click, gensym("click"),
         A_FLOAT, A_FLOAT, A_FLOAT, A_FLOAT, A_FLOAT, 0);
     class_addmethod(clone_class, (t_method)clone_loadbang, gensym("loadbang"),

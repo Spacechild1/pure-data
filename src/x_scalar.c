@@ -188,7 +188,7 @@ void canvas_add_for_class(t_class *c);
 void x_scalar_setup(void)
 {
     scalar_define_class = class_new(gensym("scalar define"), 0,
-        (t_method)canvas_free, sizeof(t_canvas), 0, 0);
+        (t_method)canvas_free, sizeof(t_canvas), CLASS_DEFAULT, 0);
     canvas_add_for_class(scalar_define_class);
     class_addmethod(scalar_define_class, (t_method)scalar_define_send,
         gensym("send"), A_SYMBOL, 0);

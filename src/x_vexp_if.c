@@ -800,7 +800,7 @@ expr_setup(void)
          * expr~ initialization
          */
         expr_tilde_class = class_new(gensym("expr~"), (t_newmethod)expr_new,
-            (t_method)expr_ff, sizeof(t_expr), 0, A_GIMME, 0);
+            (t_method)expr_ff, sizeof(t_expr), CLASS_DEFAULT, A_GIMME, 0);
         class_addmethod(expr_tilde_class, nullfn, gensym("signal"), 0);
         CLASS_MAINSIGNALIN(expr_tilde_class, t_expr, exp_f);
         class_addmethod(expr_tilde_class,(t_method)expr_dsp, gensym("dsp"),
@@ -812,7 +812,7 @@ expr_setup(void)
          * fexpr~ initialization
          */
         fexpr_tilde_class = class_new(gensym("fexpr~"), (t_newmethod)expr_new,
-            (t_method)expr_ff, sizeof(t_expr), 0, A_GIMME, 0);
+            (t_method)expr_ff, sizeof(t_expr), CLASS_DEFAULT, A_GIMME, 0);
         class_addmethod(fexpr_tilde_class, nullfn, gensym("signal"), 0);
         CLASS_MAINSIGNALIN(fexpr_tilde_class, t_expr, exp_f);
         class_addmethod(fexpr_tilde_class,(t_method)expr_start,
