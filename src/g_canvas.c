@@ -2023,7 +2023,7 @@ void g_canvas_setup(void)
         /* we prevent the user from typing "canvas" in an object box
         by sending 0 for a creator function. */
     canvas_class = class_new(gensym("canvas"), 0,
-        (t_method)canvas_free, sizeof(t_canvas), CLASS_NOINLET, 0);
+        (t_method)canvas_free, sizeof(t_canvas), CLASS_THREADSAFE | CLASS_NOINLET, 0);
             /* here is the real creator function, invoked in patch files
             by sending the "canvas" message to #N, which is bound
             to pd_camvasmaker. */

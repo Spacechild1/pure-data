@@ -127,7 +127,7 @@ static void sighip_clear(t_sighip *x, t_floatarg q)
 void sighip_setup(void)
 {
     sighip_class = class_new(gensym("hip~"), (t_newmethod)sighip_new, 0,
-        sizeof(t_sighip), 0, A_DEFFLOAT, 0);
+        sizeof(t_sighip), CLASS_DEFAULT, A_DEFFLOAT, 0);
     CLASS_MAINSIGNALIN(sighip_class, t_sighip, x_f);
     class_addmethod(sighip_class, (t_method)sighip_dsp,
         gensym("dsp"), A_CANT, 0);
@@ -215,7 +215,7 @@ static void siglop_dsp(t_siglop *x, t_signal **sp)
 void siglop_setup(void)
 {
     siglop_class = class_new(gensym("lop~"), (t_newmethod)siglop_new, 0,
-        sizeof(t_siglop), 0, A_DEFFLOAT, 0);
+        sizeof(t_siglop), CLASS_DEFAULT, A_DEFFLOAT, 0);
     CLASS_MAINSIGNALIN(siglop_class, t_siglop, x_f);
     class_addmethod(siglop_class, (t_method)siglop_dsp,
         gensym("dsp"), A_CANT, 0);
@@ -347,7 +347,7 @@ static void sigbp_dsp(t_sigbp *x, t_signal **sp)
 void sigbp_setup(void)
 {
     sigbp_class = class_new(gensym("bp~"), (t_newmethod)sigbp_new, 0,
-        sizeof(t_sigbp), 0, A_DEFFLOAT, A_DEFFLOAT, 0);
+        sizeof(t_sigbp), CLASS_DEFAULT, A_DEFFLOAT, A_DEFFLOAT, 0);
     CLASS_MAINSIGNALIN(sigbp_class, t_sigbp, x_f);
     class_addmethod(sigbp_class, (t_method)sigbp_dsp,
         gensym("dsp"), A_CANT, 0);
@@ -471,7 +471,7 @@ static void sigbiquad_dsp(t_sigbiquad *x, t_signal **sp)
 void sigbiquad_setup(void)
 {
     sigbiquad_class = class_new(gensym("biquad~"), (t_newmethod)sigbiquad_new,
-        0, sizeof(t_sigbiquad), 0, A_GIMME, 0);
+        0, sizeof(t_sigbiquad), CLASS_DEFAULT, A_GIMME, 0);
     CLASS_MAINSIGNALIN(sigbiquad_class, t_sigbiquad, x_f);
     class_addmethod(sigbiquad_class, (t_method)sigbiquad_dsp,
         gensym("dsp"), A_CANT, 0);
@@ -549,7 +549,7 @@ static void sigsamphold_set(t_sigsamphold *x, t_float f)
 void sigsamphold_setup(void)
 {
     sigsamphold_class = class_new(gensym("samphold~"),
-        (t_newmethod)sigsamphold_new, 0, sizeof(t_sigsamphold), 0, 0);
+        (t_newmethod)sigsamphold_new, 0, sizeof(t_sigsamphold), CLASS_DEFAULT, 0);
     CLASS_MAINSIGNALIN(sigsamphold_class, t_sigsamphold, x_f);
     class_addmethod(sigsamphold_class, (t_method)sigsamphold_set,
         gensym("set"), A_DEFFLOAT, 0);
@@ -621,8 +621,8 @@ static void sigrpole_set(t_sigrpole *x, t_float f)
 
 void sigrpole_setup(void)
 {
-    sigrpole_class = class_new(gensym("rpole~"),
-        (t_newmethod)sigrpole_new, 0, sizeof(t_sigrpole), 0, A_DEFFLOAT, 0);
+    sigrpole_class = class_new(gensym("rpole~"), (t_newmethod)sigrpole_new,
+        0, sizeof(t_sigrpole), CLASS_DEFAULT, A_DEFFLOAT, 0);
     CLASS_MAINSIGNALIN(sigrpole_class, t_sigrpole, x_f);
     class_addmethod(sigrpole_class, (t_method)sigrpole_set,
         gensym("set"), A_DEFFLOAT, 0);
@@ -693,8 +693,8 @@ static void sigrzero_set(t_sigrzero *x, t_float f)
 
 void sigrzero_setup(void)
 {
-    sigrzero_class = class_new(gensym("rzero~"),
-        (t_newmethod)sigrzero_new, 0, sizeof(t_sigrzero), 0, A_DEFFLOAT, 0);
+    sigrzero_class = class_new(gensym("rzero~"), (t_newmethod)sigrzero_new,
+        0, sizeof(t_sigrzero), CLASS_DEFAULT, A_DEFFLOAT, 0);
     CLASS_MAINSIGNALIN(sigrzero_class, t_sigrzero, x_f);
     class_addmethod(sigrzero_class, (t_method)sigrzero_set,
         gensym("set"), A_DEFFLOAT, 0);
@@ -767,7 +767,7 @@ void sigrzero_rev_setup(void)
 {
     sigrzero_rev_class = class_new(gensym("rzero_rev~"),
         (t_newmethod)sigrzero_rev_new, 0, sizeof(t_sigrzero_rev),
-        0, A_DEFFLOAT, 0);
+        CLASS_DEFAULT, A_DEFFLOAT, 0);
     CLASS_MAINSIGNALIN(sigrzero_rev_class, t_sigrzero_rev, x_f);
     class_addmethod(sigrzero_rev_class, (t_method)sigrzero_rev_set,
         gensym("set"), A_DEFFLOAT, 0);
@@ -859,8 +859,8 @@ static void sigcpole_set(t_sigcpole *x, t_float re, t_float im)
 void sigcpole_setup(void)
 {
     sigcpole_class = class_new(gensym("cpole~"),
-        (t_newmethod)sigcpole_new, 0, sizeof(t_sigcpole), 0,
-            A_DEFFLOAT, A_DEFFLOAT, 0);
+        (t_newmethod)sigcpole_new, 0, sizeof(t_sigcpole),
+            CLASS_DEFAULT, A_DEFFLOAT, A_DEFFLOAT, 0);
     CLASS_MAINSIGNALIN(sigcpole_class, t_sigcpole, x_f);
     class_addmethod(sigcpole_class, (t_method)sigcpole_set,
         gensym("set"), A_DEFFLOAT, A_DEFFLOAT, 0);
@@ -949,8 +949,8 @@ static void sigczero_set(t_sigczero *x, t_float re, t_float im)
 void sigczero_setup(void)
 {
     sigczero_class = class_new(gensym("czero~"),
-        (t_newmethod)sigczero_new, 0, sizeof(t_sigczero), 0,
-            A_DEFFLOAT, A_DEFFLOAT, 0);
+        (t_newmethod)sigczero_new, 0, sizeof(t_sigczero),
+            CLASS_DEFAULT, A_DEFFLOAT, A_DEFFLOAT, 0);
     CLASS_MAINSIGNALIN(sigczero_class, t_sigczero, x_f);
     class_addmethod(sigczero_class, (t_method)sigczero_set,
         gensym("set"), A_DEFFLOAT, A_DEFFLOAT, 0);
@@ -1041,8 +1041,8 @@ static void sigczero_rev_set(t_sigczero_rev *x, t_float re, t_float im)
 void sigczero_rev_setup(void)
 {
     sigczero_rev_class = class_new(gensym("czero_rev~"),
-        (t_newmethod)sigczero_rev_new, 0, sizeof(t_sigczero_rev), 0,
-            A_DEFFLOAT, A_DEFFLOAT, 0);
+        (t_newmethod)sigczero_rev_new, 0, sizeof(t_sigczero_rev),
+            CLASS_DEFAULT, A_DEFFLOAT, A_DEFFLOAT, 0);
     CLASS_MAINSIGNALIN(sigczero_rev_class, t_sigczero_rev, x_f);
     class_addmethod(sigczero_rev_class, (t_method)sigczero_rev_set,
         gensym("set"), A_DEFFLOAT, A_DEFFLOAT, 0);
@@ -1151,7 +1151,7 @@ static void slop_tilde_dsp(t_slop_tilde *x, t_signal **sp)
 void slop_tilde_setup(void)
 {
     slop_tilde_class = class_new(gensym("slop~"), (t_newmethod)slop_tilde_new, 0,
-        sizeof(t_slop_tilde), 0, A_GIMME, 0);
+        sizeof(t_slop_tilde), CLASS_DEFAULT, A_GIMME, 0);
     CLASS_MAINSIGNALIN(slop_tilde_class, t_slop_tilde, x_f);
     class_addmethod(slop_tilde_class, (t_method)slop_tilde_dsp,
         gensym("dsp"), A_CANT, 0);

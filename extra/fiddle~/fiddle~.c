@@ -1498,7 +1498,7 @@ void *sigfiddle_new(t_floatarg npoints, t_floatarg npitch,
 void fiddle_tilde_setup(void)
 {
     sigfiddle_class = class_new(gensym("fiddle~"), (t_newmethod)sigfiddle_new,
-        (t_method)sigfiddle_ff, sizeof(t_sigfiddle), 0,
+        (t_method)sigfiddle_ff, sizeof(t_sigfiddle), CLASS_DEFAULT,
             A_DEFFLOAT, A_DEFFLOAT, A_DEFFLOAT, A_DEFFLOAT, 0);
     class_addmethod(sigfiddle_class, (t_method)sigfiddle_dsp,
         gensym("dsp"), 0);

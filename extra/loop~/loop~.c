@@ -158,7 +158,7 @@ static void loop_bang(t_loop *x)
 void loop_tilde_setup(void)
 {
     loop_class = class_new(gensym("loop~"), (t_newmethod)loop_new, 0,
-        sizeof(t_loop), 0, 0);
+        sizeof(t_loop), CLASS_DEFAULT, 0);
     class_addmethod(loop_class, (t_method)loop_dsp, gensym("dsp"), A_CANT, 0);
     CLASS_MAINSIGNALIN(loop_class, t_loop, x_f);
     class_addmethod(loop_class, (t_method)loop_set, gensym("set"),

@@ -293,7 +293,7 @@ static void *vinlet_newsig(t_symbol *s, int argc, t_atom *argv)
 static void vinlet_setup(void)
 {
     vinlet_class = class_new(gensym("inlet"), (t_newmethod)vinlet_new,
-        (t_method)vinlet_free, sizeof(t_vinlet), CLASS_NOINLET, A_DEFSYM, 0);
+        (t_method)vinlet_free, sizeof(t_vinlet), CLASS_THREADSAFE | CLASS_NOINLET, A_DEFSYM, 0);
     class_addcreator((t_newmethod)vinlet_newsig, gensym("inlet~"), A_GIMME, 0);
     class_addbang(vinlet_class, vinlet_bang);
     class_addpointer(vinlet_class, vinlet_pointer);
@@ -597,7 +597,7 @@ static void *voutlet_newsig(t_symbol *s)
 static void voutlet_setup(void)
 {
     voutlet_class = class_new(gensym("outlet"), (t_newmethod)voutlet_new,
-        (t_method)voutlet_free, sizeof(t_voutlet), CLASS_NOINLET, A_DEFSYM, 0);
+        (t_method)voutlet_free, sizeof(t_voutlet), CLASS_THREADSAFE | CLASS_NOINLET, A_DEFSYM, 0);
     class_addcreator((t_newmethod)voutlet_newsig, gensym("outlet~"), A_DEFSYM, 0);
     class_addbang(voutlet_class, voutlet_bang);
     class_addpointer(voutlet_class, voutlet_pointer);

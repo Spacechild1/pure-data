@@ -2232,7 +2232,7 @@ static void readsf_setup(void)
 {
     readsf_class = class_new(gensym("readsf~"),
         (t_newmethod)readsf_new, (t_method)readsf_free,
-        sizeof(t_readsf), 0, A_DEFFLOAT, A_DEFFLOAT, 0);
+        sizeof(t_readsf), CLASS_DEFAULT, A_DEFFLOAT, A_DEFFLOAT, 0);
     class_addfloat(readsf_class, (t_method)readsf_float);
     class_addmethod(readsf_class, (t_method)readsf_start, gensym("start"), 0);
     class_addmethod(readsf_class, (t_method)readsf_stop, gensym("stop"), 0);
@@ -2725,7 +2725,7 @@ static void writesf_setup(void)
 {
     writesf_class = class_new(gensym("writesf~"),
         (t_newmethod)writesf_new, (t_method)writesf_free,
-        sizeof(t_writesf), 0, A_DEFFLOAT, A_DEFFLOAT, 0);
+        sizeof(t_writesf), CLASS_DEFAULT, A_DEFFLOAT, A_DEFFLOAT, 0);
     class_addmethod(writesf_class, (t_method)writesf_start, gensym("start"), 0);
     class_addmethod(writesf_class, (t_method)writesf_stop, gensym("stop"), 0);
     class_addmethod(writesf_class, (t_method)writesf_dsp,

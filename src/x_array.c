@@ -897,7 +897,7 @@ void canvas_add_for_class(t_class *c);
 void x_array_setup(void)
 {
     array_define_class = class_new(gensym("array define"), 0,
-        (t_method)canvas_free, sizeof(t_canvas), 0, 0);
+        (t_method)canvas_free, sizeof(t_canvas), CLASS_DEFAULT, 0);
     canvas_add_for_class(array_define_class);
     class_addmethod(array_define_class, (t_method)array_define_send,
         gensym("send"), A_SYMBOL, 0);
