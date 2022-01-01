@@ -1418,7 +1418,7 @@ static void sigmund_printnext(t_sigmund *x, t_float f)
 void sigmund_tilde_setup(void)
 {
     sigmund_class = class_new(gensym("sigmund~"), (t_newmethod)sigmund_new,
-        (t_method)sigmund_free, sizeof(t_sigmund), 0, A_GIMME, 0);
+        (t_method)sigmund_free, sizeof(t_sigmund), CLASS_DEFAULT, A_GIMME, 0);
     class_addlist(sigmund_class, sigmund_list);
     class_addmethod(sigmund_class, (t_method)sigmund_dsp, gensym("dsp"),
         A_CANT, 0);

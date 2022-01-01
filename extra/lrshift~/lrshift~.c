@@ -68,9 +68,9 @@ static void *lrshift_tilde_new(t_floatarg f)
 void lrshift_tilde_setup(void)
 {
     lrshift_tilde_class = class_new(gensym("lrshift~"),
-        (t_newmethod)lrshift_tilde_new, 0, sizeof(t_lrshift_tilde), 0, 
-            A_DEFFLOAT, 0);
+        (t_newmethod)lrshift_tilde_new, 0, sizeof(t_lrshift_tilde),
+            CLASS_DEFAULT, A_DEFFLOAT, 0);
     CLASS_MAINSIGNALIN(lrshift_tilde_class, t_lrshift_tilde, x_f);
     class_addmethod(lrshift_tilde_class, (t_method)lrshift_tilde_dsp,
-        gensym("dsp"), 0);
+        gensym("dsp"), A_CANT, 0);
 }

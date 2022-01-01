@@ -1179,7 +1179,7 @@ static void *pd_tilde_new(t_symbol *s, int argc, t_atom *argv)
 void pd_tilde_setup(void)
 {
     pd_tilde_class = class_new(gensym("pd~"), (t_newmethod)pd_tilde_new,
-        (t_method)pd_tilde_free, sizeof(t_pd_tilde), 0, A_GIMME, 0);
+        (t_method)pd_tilde_free, sizeof(t_pd_tilde), CLASS_DEFAULT, A_GIMME, 0);
     class_addmethod(pd_tilde_class, nullfn, gensym("signal"), 0);
     class_addmethod(pd_tilde_class, (t_method)pd_tilde_dsp, gensym("dsp"),
         A_CANT, 0);
