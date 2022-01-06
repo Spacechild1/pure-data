@@ -2,21 +2,27 @@
  * For information on usage and redistribution, and for a DISCLAIMER OF ALL
  * WARRANTIES, see the file, "LICENSE.txt," in this distribution.  */
 
-#include "m_pd.h"
-#include "s_stuff.h"
-#include "m_imp.h"
-
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
-
 #if PD_DSPTHREADS
 
 #if !PD_PARALLEL
 # error PD_DSPTHREADS requires PD_PARALLEL!
 #endif
 
+/* This one must be define before including any headers! */
+#ifdef __linux__
+# ifndef _GNU_SOURCE
+#  define _GNU_SOURCE
+# endif
+#endif
+
+#include "m_pd.h"
+#include "s_stuff.h"
+#include "m_imp.h"
 #include "s_sync.h"
+
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
 
 #include <pthread.h>
 
@@ -28,6 +34,7 @@
 #else /* Linux */
 # include <unistd.h>
 # include <sys/sysinfo.h>
+# include <sched.h>
 #endif
 
 /* define for debugging DSP tasks and task queues */
@@ -357,6 +364,8 @@ static int thread_set_realtime(void)
     }
     return 1;
 #elif defined(__APPLE__)
+        /* Is SCHED_RR still appropriate?
+         * Should we use the Mach API instead? */
     struct sched_param param;
     int policy = SCHED_RR;
     int err;
@@ -384,6 +393,70 @@ static int thread_set_realtime(void)
         return 0;
     }
     return 1;
+#endif
+}
+
+    /* 1: success, 0: failure */
+static int thread_set_affinity(int i)
+{
+#if defined(_WIN32)
+    static THREADLOCAL DWORD_PTR original = 0;
+    if (i >= 0) /* pin to the given CPU */
+    {
+        DWORD oldmask, newmask = (DWORD_PTR)1 << i;
+        oldmask = SetThreadAffinityMask(GetCurrentThread(), newmask);
+        if (oldmask == 0)
+        {
+            fprintf(stderr, "SetThreadAffinityMask() failed (%d)\n", GetLastError());
+            return 0;
+        }
+            /* store original CPU mask (only the first time!) */
+        if (!original)
+            original = oldmask;
+    }
+    else if (original) /* restore original mask */
+    {
+        if (SetThreadAffinityMask(GetCurrentThread(), original) == 0)
+        {
+            fprintf(stderr, "SetThreadAffinityMask() failed (%d)\n", GetLastError());
+            return 0;
+        }
+    }
+    return 1;
+#elif defined(__linux__)
+    cpu_set_t cpuset, *ptr;
+    static THREADLOCAL cpu_set_t original;
+    static THREADLOCAL int initted = 0;
+        /* store original CPU set when we first enter this function */
+    if (initted < 0)
+        return 0; /* init failed */
+    if (!initted)
+    {
+        if (sched_getaffinity(0, sizeof(cpu_set_t), &original) != 0)
+        {
+            fprintf(stderr, "sched_getaffinity() failed (%d)\n", errno);
+            initted = -1;
+            return 0;
+        }
+        initted = 1;
+    }
+    if (i >= 0) /* pin to the given CPU */
+    {
+        CPU_ZERO(&cpuset);
+        CPU_SET(i, &cpuset);
+        ptr = &cpuset;
+    }
+    else /* restore original CPU set */
+        ptr = &original;
+    if (sched_setaffinity(0, sizeof(cpu_set_t), ptr) < 0)
+    {
+        fprintf(stderr, "sched_setaffinity() failed (%d)\n", errno);
+        return 0;
+    }
+    return 1;
+#else
+    fprintf(stderr, "thread_set_affinity() not implemented\n");
+    return 0;
 #endif
 }
 
@@ -439,6 +512,41 @@ static void dspthread_setrealtime(int index)
     }
     else
         fprintf(stderr, "DSP thread %d: couldn't set realtime priority\n", index);
+}
+
+static void dspthread_pin(int index, int pin)
+{
+        /* We only use thread pinning on Windows and Linux;
+         * on macOS we want to use audio workgroups instead. */
+#if defined(_WIN32) || defined(__linux__)
+    if (sys_threadaffinity && (numcpus > 0))
+    {
+        if (index >= 0 && index < numcpus)
+        {
+            if (pin) /* pin to thread */
+            {
+                    /* see cpuinfo_sort() */
+                int cpu = cpuvec[index].id;
+                if (thread_set_affinity(cpu))
+                {
+                    if (sys_verbose)
+                        fprintf(stderr, "DSP thread %d: "
+                            "pinned to CPU %d\n", index, cpu);
+                }
+                else
+                    fprintf(stderr, "DSP thread %d: "
+                        "could not pin to CPU %d\n", index, cpu);
+            }
+            else /* unpin */
+            {
+                if (!thread_set_affinity(-1))
+                    fprintf(stderr, "DSP thread %d: could not unpin\n", index);
+            }
+        }
+        else
+            bug("dspthread_pin");
+    }
+#endif
 }
 
 /* -------------------------- t_dspthreadpool --------------------------- */
@@ -502,6 +610,9 @@ static void dspthreadpool_init(void)
         d_threadpool->tp_threads = 0;
         lockfree_stack_init(&d_threadpool->tp_tasks);
         fast_semaphore_init(&d_threadpool->tp_sem);
+            /* for thread pinning */
+        if (sys_threadaffinity)
+            parse_hardware_topology();
     }
 }
 
@@ -529,6 +640,8 @@ void dspthreadpool_stop(int external)
         freebytes(d_threadpool->tp_threads, sizeof(pthread_t) * n);
     d_threadpool->tp_threads = 0;
     d_threadpool->tp_n = 0;
+
+    dspthread_pin(0, 0); /* unpin */
 }
 
 int sys_dspthreadpool_start(int *numthreads, int external)
@@ -562,14 +675,16 @@ int sys_dspthreadpool_start(int *numthreads, int external)
     }
     else /* use internal DSP threads */
     {
-        if (n > 0)
+        if (n > 0) /* multi-threaded */
         {
             d_threadpool->tp_threads = (pthread_t *)getbytes(sizeof(pthread_t) * n);
             d_threadpool->tp_n = n;
-            /* spawn new threads; thread index starts at 1 */
+            /* spawn new threads; index for DSP helper threads starts at 1 */
             for (int i = 0; i < n; ++i)
                 pthread_create(&d_threadpool->tp_threads[i],
                     NULL, thread_function, (void *)(intptr_t)(i + 1));
+            /* only pin main thread if we actually have helper threads */
+            dspthread_pin(0, 1);
         }
         else /* single threaded */
         {
@@ -612,6 +727,7 @@ static void dspthread_dorun(int index)
     fprintf(stderr, "DSP thread %d: start\n", index);
 #endif
     dspthread_setindex(index);
+    dspthread_pin(index, 1);
     mayer_init(); /* init FFT */
 
 #ifdef MSVC_INTERLOCKED

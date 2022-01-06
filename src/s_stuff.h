@@ -431,6 +431,7 @@ EXTERN int sys_dspthreadpool_stop(int external);
 EXTERN int sys_dspthread_run(int index);
 
 EXTERN int sys_threadsafe; /* enable/disable thread-safety checks */
+EXTERN int sys_threadaffinity; /* enable/disable thread pinning */
 
 struct _instancestuff
 {
