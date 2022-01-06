@@ -35,6 +35,248 @@
 
 /* ----------------------- thread utilities -------------------------- */
 
+typedef struct _cpuinfo
+{
+    int physical_id;
+    int core_id;
+    int sibling_id;
+    int id;
+} t_cpuinfo;
+
+    /* convert t_cpuinfo to an uint64_t for comparison.
+     * We try to keep siblings as far apart as possible,
+     * followed by physical packages, so that cores of
+     * the same package are close to each other. */
+static inline uint64_t cpuinfo2number(t_cpuinfo *x)
+{
+    return ((uint64_t)(x)->sibling_id << 24) |
+        ((uint64_t)(x)->physical_id << 16) | ((uint64_t)(x)->core_id);
+}
+
+static t_cpuinfo *cpuvec = NULL;
+static int numcpus = 0;
+static int numcores = 0;
+static int numpackages = 0;
+
+static void cpuinfo_print(void)
+{
+    int i;
+    fprintf(stderr, "hardware topology:\n");
+    fprintf(stderr, "\tlogical processors: %d\n", numcpus);
+    fprintf(stderr, "\tCPU cores: %d\n", numcores);
+    fprintf(stderr, "\tphysical packages: %d\n", numpackages);
+    fprintf(stderr, "\t---\n");
+    for (i = 0; i < numcpus; i++)
+    {
+        fprintf(stderr, "\t#%d package: %d, core: %d, sibling: %d\n",
+            i, cpuvec[i].physical_id, cpuvec[i].core_id, cpuvec[i].sibling_id);
+    }
+    fflush(stderr);
+}
+
+    /* sort the list so that we can simply pick
+     * consecutive CPUs for effective thread pinning. */
+static int cpuinfo_sort(const void *x, const void *y)
+{
+    uint64_t a = cpuinfo2number((t_cpuinfo *)x);
+    uint64_t b = cpuinfo2number((t_cpuinfo *)y);
+    return (a > b) ? 1 : (a < b) ? -1 : 0;
+}
+
+static void cpuinfo_done(void)
+{
+    if (sys_verbose)
+        cpuinfo_print(); /* print original list */
+        /* sort the list */
+    qsort(cpuvec, numcpus, sizeof(t_cpuinfo), cpuinfo_sort);
+#if 0
+    cpuinfo_print(); /* print sorted list (for debugging) */
+#endif
+}
+
+    /* 1: success, 0: failure */
+static int parse_hardware_topology(void)
+{
+    /* Make sure to call this only once. This is not really thread-safe,
+     * but in practice the function is called for the first time either in
+     * threadpool_init() or via sys_argparse() -> sys_set_audio_settings().
+     * LATER replace with C11 call_once(). */
+    static int initted = 0;
+    if (initted)
+        return (numcpus > 0);
+    initted = 1;
+#ifdef _WIN32 /* Windows */
+    typedef BOOL (WINAPI *LPFN_GLPI)(
+        PSYSTEM_LOGICAL_PROCESSOR_INFORMATION, PDWORD);
+
+    LPFN_GLPI glpi;
+    PSYSTEM_LOGICAL_PROCESSOR_INFORMATION info;
+    DWORD err, size = 0;
+    int i, n;
+
+        /* available since Windows XP SP3 */
+    glpi = (LPFN_GLPI) GetProcAddress(
+        GetModuleHandleA("kernel32"), "GetLogicalProcessorInformation");
+    if (!glpi)
+    {
+        fprintf(stderr, "GetLogicalProcessorInformation() not supported\n");
+        return 0;
+    }
+        /* call with size 0 to retrieve actual size;
+         * ERROR_INSUFFICIENT_BUFFER is expected. */
+    glpi(NULL, &size);
+    if ((err = GetLastError()) != ERROR_INSUFFICIENT_BUFFER)
+        goto fail;
+    info = (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION)malloc(size);
+    if (glpi(info, &size) == FALSE)
+    {
+        err = GetLastError();
+        free(info);
+        goto fail;
+    }
+    n = size / sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION);
+    for (i = 0; i < n; ++i)
+    {
+        if (info[i].Relationship == RelationProcessorCore)
+        {
+                /* add all siblings to CPU list */
+            int j, nsiblings = 0;
+            ULONG_PTR mask = info[i].ProcessorMask;
+            for (j = 0; mask; j++, mask >>= 1)
+            {
+                if (mask & 1)
+                {
+                    t_cpuinfo info = { 0, numcores, nsiblings, j };
+                    int index = numcpus++;
+                    cpuvec = realloc(cpuvec,
+                        sizeof(t_cpuinfo) * numcpus);
+                    cpuvec[index] = info;
+                    nsiblings++;
+                }
+            }
+            numcores++;
+        }
+    }
+        /* loop again for physical packages */
+    for (i = 0; i < n; ++i)
+    {
+        if (info[i].Relationship == RelationProcessorPackage)
+        {
+            int j, k;
+            ULONG_PTR mask = info[i].ProcessorMask;
+                /* loop over all processors and find corresponding t_cpuinfo */
+            for (j = 0; mask; j++, mask >>= 1)
+            {
+                if (mask & 1)
+                {
+                    for (k = 0; k < numcpus; ++k)
+                    {
+                        if (cpuvec[k].id == j)
+                            cpuvec[k].physical_id = numpackages;
+                    }
+                }
+            }
+            numpackages++;
+        }
+    }
+    free(info);
+    cpuinfo_done();
+    return 1;
+fail:
+    fprintf(stderr, "GetLogicalProcessorInformation() failed (%d)\n", err);
+    return 0;
+#elif defined(__linux__) /* Linux */
+    /* The file /proc/cpusinfo contains all logical CPUs where
+     * each entry has a property "physical id" and "core id". */
+    t_cpuinfo current;
+    FILE *fp;
+    char *line = 0;
+    size_t len;
+    int index, num = 0;
+
+    fp = fopen("/proc/cpuinfo", "r");
+    if (!fp)
+    {
+        fprintf(stderr, "could not open /proc/cpuinfo\n");
+        return 0;
+    }
+    while (getline(&line, &len, fp) >= 0)
+    {
+        const char *colon;
+        int i, found, value;
+        if (len == 0)
+            continue;
+            /* "physical id" comes first */
+        if (strstr(line, "physical id"))
+        {
+            if (!(colon = strchr(line + strlen("physical id"), ':')) ||
+                (sscanf(colon + 1, "%d", &value) < 1))
+            {
+                goto fail;
+            }
+            current.physical_id = value;
+        }
+            /* followed by "core id" */
+        else if (strstr(line, "core id"))
+        {
+            if (!(colon = strchr(line + strlen("core id"), ':')) ||
+                (sscanf(colon + 1, "%d", &value) < 1))
+            {
+                goto fail;
+            }
+            current.core_id = value;
+            current.sibling_id = 0;
+            current.id = num++;
+                /* get sibling number */
+            for (i = 0; i < numcpus; ++i)
+            {
+                if ((cpuvec[i].physical_id == current.physical_id) &&
+                    (cpuvec[i].core_id == current.core_id))
+                {
+                    current.sibling_id++;
+                }
+            }
+            if (current.sibling_id == 0)
+                numcores++;
+                /* check if new physical package */
+            found = 0;
+            for (i = 0; i < numcpus; ++i)
+            {
+                if (cpuvec[i].physical_id == current.physical_id)
+                    found = 1;
+            }
+            if (!found)
+                numpackages++;
+
+            index = numcpus++;
+            cpuvec = realloc(cpuvec,
+                sizeof(t_cpuinfo) * numcpus);
+            cpuvec[index] = current;
+        }
+    }
+    if (line)
+        free(line);
+    fclose(fp);
+    cpuinfo_done();
+    return 1;
+fail:
+    fprintf(stderr, "/proc/cpuinfo: unexpected format\n");
+    fclose(fp);
+    if (line)
+        free(line);
+    if (cpuvec)
+        free(cpuvec);
+    cpuvec = NULL;
+    numcpus = 0;
+    numcores = 0;
+    numpackages = 0;
+    return 0;
+#else /* Apple, BSDs, etc. */
+    fprintf(stderr, "parsse_hardware_topology() not implemented\n");
+    return 0;
+#endif
+}
+
     /* 0: failure */
 static int thread_hardware_concurrency(void)
 {
@@ -73,47 +315,9 @@ static int thread_hardware_concurrency(void)
     /* 0: failure */
 static int thread_physical_concurrency(void)
 {
-#if defined(_WIN32)
-    typedef BOOL (WINAPI *LPFN_GLPI)(
-        PSYSTEM_LOGICAL_PROCESSOR_INFORMATION, PDWORD);
-
-    LPFN_GLPI glpi;
-    PSYSTEM_LOGICAL_PROCESSOR_INFORMATION info;
-    DWORD err, size = 0;
-    int i, n, count = 0;
-
-        /* available since Windows XP SP3 */
-    glpi = (LPFN_GLPI) GetProcAddress(
-        GetModuleHandleA("kernel32"), "GetLogicalProcessorInformation");
-    if (!glpi)
-    {
-        fprintf(stderr, "GetLogicalProcessorInformation() not supported;\n"
-            "fall back to thread_hardware_concurrency\n");
-        return thread_hardware_concurrency();
-    }
-        /* call with size 0 to retrieve actual size;
-         * ERROR_INSUFFICIENT_BUFFER is expected. */
-    glpi(NULL, &size);
-    if ((err = GetLastError()) != ERROR_INSUFFICIENT_BUFFER)
-        goto fail;
-    info = (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION)malloc(size);
-    if (glpi(info, &size) == FALSE)
-    {
-        err = GetLastError();
-        free(info);
-        goto fail;
-    }
-    n = size / sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION);
-    for (i = 0; i < n; ++i)
-    {
-        if (info[i].Relationship == RelationProcessorCore)
-            count++;
-    }
-    free(info);
-    return count;
-fail:
-    fprintf(stderr, "GetLogicalProcessorInformation() failed (%d)\n", err);
-    return 0;
+#if defined(_WIN32) || defined(__linux__)
+    parse_hardware_topology(); /* see comment */
+    return numcores;
 #elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__FreeBSD_kernel__)
     int count;
     size_t size = sizeof(count);
@@ -124,73 +328,6 @@ fail:
         fprintf(stderr, "sysctlbyname() failed (%d)\n", errno);
         return 0;
     }
-#elif defined(__linux__)
-    /* The file /proc/cpusinfo contains all logical CPUs where
-     * each entry has a property "physical id" and "core id".
-     * We filter entries where those properties are the same
-     * (= SMT), so we end up with the number of physical CPUs. */
-    #define MAXNUMCPUS 1024
-    unsigned int cpus[MAXNUMCPUS];
-        /* upper 2 bytes: physical ID, lower 2 bytes: core ID */
-    unsigned int current = 0;
-    FILE *fp;
-    char *line = 0;
-    size_t len;
-    int num = 0, count = 0;
-    fp = fopen("/proc/cpuinfo", "r");
-    if (!fp)
-    {
-        fprintf(stderr, "could not open /proc/cpuinfo\n");
-        return 0;
-    }
-    while ((getline(&line, &len, fp) >= 0) && (count < MAXNUMCPUS))
-    {
-        const char *colon;
-        int i, value;
-        if (len == 0)
-            continue;
-            /* "physical id" comes first */
-        if (strstr(line, "physical id"))
-        {
-            if (!(colon = strchr(line + strlen("physical id"), ':')) ||
-                (sscanf(colon + 1, "%d", &value) < 1))
-            {
-                count = 0;
-                break;
-            }
-            current = ((unsigned int)value) << 16;
-        }
-            /* followed by "core id" */
-        else if (strstr(line, "core id"))
-        {
-            if (!(colon = strchr(line + strlen("core id"), ':')) ||
-                (sscanf(colon + 1, "%d", &value) < 1))
-            {
-                count = 0;
-                break;
-            }
-            current |= (unsigned int)value;
-                /* now check if this entry already exists */
-            for (i = 0; i < count; ++i)
-            {
-                if (cpus[i] == current)
-                    goto skip;
-            }
-            cpus[count++] = current;
-        skip:
-        #if 0
-            fprintf(stderr, "CPU %d: physical id: %d, core id: %d\n",
-                num, current >> 16, current & 0xffff);
-        #endif
-            num++;
-        }
-    }
-    if (line)
-        free(line);
-    fclose(fp);
-    if (count == 0)
-        fprintf(stderr, "/proc/cpuinfo: unexpected format\n");
-    return count;
 #else
     #warning "thread_physical_concurrency() not implemented"
         /* fall back to hardware concurrency */
