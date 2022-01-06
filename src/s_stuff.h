@@ -432,6 +432,7 @@ EXTERN int sys_dspthread_run(int index);
 
 EXTERN int sys_threadsafe; /* enable/disable thread-safety checks */
 EXTERN int sys_threadaffinity; /* enable/disable thread pinning */
+EXTERN int sys_threadspinwait; /* spin while waiting for tasks */
 
 struct _instancestuff
 {

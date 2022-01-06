@@ -94,6 +94,7 @@ struct _instanceugen
 #if PD_DSPTHREADS
     t_dsptaskqueue *u_dspqueue; /* global DSP thread queue */
     t_lockfree_stack u_clocks; /* deferred clocks */
+    int u_numtasks;            /* total number of DSP tasks */
 #endif
 };
 
@@ -108,6 +109,7 @@ void d_ugen_newpdinstance(void)
 #if PD_DSPTHREADS
     THIS->u_dspqueue = dsptaskqueue_new(0);
     lockfree_stack_init(&THIS->u_clocks);
+    THIS->u_numtasks = 0;
 #endif
 }
 
@@ -540,6 +542,7 @@ void dsp_addv(t_perfroutine f, int n, t_int *vec)
 #if PD_DSPTHREADS
 void clock_dispatch(t_clock *x);
 void dspthread_setindex(int index);
+void dspthreadpool_tick(int ntasks);
 #endif
 
 void dsp_tick(void)
@@ -550,6 +553,7 @@ void dsp_tick(void)
     #if PD_DSPTHREADS
         t_clock *c;
         dspthread_setindex(0); /* just to be sure */
+        dspthreadpool_tick(THIS->u_numtasks);
         dsptaskqueue_reset(THIS->u_dspqueue);
     #endif
         for (ip = THIS->u_dspchain; ip; ) ip = (*(t_perfroutine)(*ip))(ip);
@@ -767,30 +771,39 @@ void ugen_addtask(t_dsptask *x)
 {
     t_dspcontext *dc, *dc2;
     t_dsptaskqueue *queue = dsptask_getqueue(x);
-    /* Add the DSP task to all enclosing switch~ objects
-     * that are *below* the owning DSP task queue.
-     * If one of these subcanvases is switched off,
-     * the task will be notified; see block_prolog(). */
+    /* Add the DSP task to all enclosing switch~ objects that
+     * are *below* the owning DSP task queue. If one of these
+     * subcanvases is switched off, the task will be notified;
+     * see block_prolog().
+     * NB: if we're spin-waiting, we have to notify *all* DSP
+     * tasks in switched-off subcanvases. */
     for (dc = THIS->u_context; dc; dc = dc->dc_parentcontext)
     {
         if (dc->dc_block && dc->dc_block->x_switched) /* switch~ */
         {
-            /* try to find queue in outer contexts */
-            for (dc2 = dc->dc_parentcontext; dc2; dc2 = dc2->dc_parentcontext)
+            if (sys_threadspinwait)
+                switch_addtask(dc->dc_block, x);
+            else
             {
-                if (dc2->dc_dspqueue == queue)
+                /* try to find matching queue in *outer* context(s) */
+                for (dc2 = dc->dc_parentcontext; dc2; dc2 = dc2->dc_parentcontext)
                 {
-                    switch_addtask(dc->dc_block, x);
-                    break;
+                    if (dc2->dc_dspqueue == queue)
+                    {
+                        switch_addtask(dc->dc_block, x);
+                        break;
+                    }
                 }
             }
         }
     }
+    THIS->u_numtasks++;
 }
 
 void ugen_removetask(t_dsptask *x)
 {
-
+    if (--THIS->u_numtasks < 0)
+        bug("ugen_removetask");
 }
 
     /* used in clone_dsp() */
