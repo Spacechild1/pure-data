@@ -545,21 +545,40 @@ void dspthread_setindex(int index);
 void dspthreadpool_tick(int ntasks);
 #endif
 
+// #define MEASURE
+
 void dsp_tick(void)
 {
     if (THIS->u_dspchain)
     {
         t_int *ip;
+    #ifdef MEASURE
+        double t1, t2, delta, blockdur;
+    #endif
     #if PD_DSPTHREADS
         t_clock *c;
         dspthread_setindex(0); /* just to be sure */
+    #ifdef MEASURE
+        t1 = sys_getrealtime();
+    #endif
         dspthreadpool_tick(THIS->u_numtasks);
         dsptaskqueue_reset(THIS->u_dspqueue);
     #endif
+
         for (ip = THIS->u_dspchain; ip; ) ip = (*(t_perfroutine)(*ip))(ip);
         THIS->u_phase++;
     #if PD_DSPTHREADS
         dsptaskqueue_join(THIS->u_dspqueue);
+    #ifdef MEASURE
+        t2 = sys_getrealtime();
+        delta = (t2 - t1) * 1000.;
+        blockdur = (double)DEFDACBLKSIZE / STUFF->st_dacsr * 1000.;
+        if (delta > blockdur)
+        {
+            fprintf(stderr, "time elapsed: %f ms (%f ms)\n", delta, blockdur);
+            fflush(stderr);
+        }
+    #endif
         /* dispatch deferred clocks */
         if ((c = lockfree_stack_release(&THIS->u_clocks)))
             clock_dispatch(c);
