@@ -574,6 +574,65 @@ void backoff_perform(t_backoff *x)
         x->b_n = BACKOFF_MAXLOOPS;
 }
 
+#if 0
+
+#define BACKOFF_NUMTRIES 64
+#define BACKOFF_UNIT 256
+#define BACKOFF_TARGET 1.0
+
+void backoff_measure(void)
+{
+    double baseline[BACKOFF_NUMTRIES];
+    double result[BACKOFF_NUMTRIES];
+    double t1, t2, avgbaseline, avgresult, diff;
+    int i, j, iterations;
+        /* calculate baseline */
+    for (i = 0; i < BACKOFF_NUMTRIES; i++)
+    {
+        t1 = sys_getrealtime();
+        sys_getrealtime();
+        sys_getrealtime();
+        t2 = sys_getrealtime();
+        baseline[i] = (t2 - t1) * 1000000.;
+    }
+    avgbaseline = 0.0;
+    for (i = 0; i < BACKOFF_NUMTRIES; i++)
+        avgbaseline += baseline[i];
+    avgbaseline /= BACKOFF_NUMTRIES;
+        /* calculate spin duration */
+    for (i = 0; i < BACKOFF_NUMTRIES; i++)
+    {
+        t1 = sys_getrealtime();
+        for (j = 0; j < BACKOFF_UNIT; j++)
+            pause_cpu();
+        t2 = sys_getrealtime();
+        result[i] = (t2 - t1) * 1000000.;
+    }
+    avgresult = 0.0;
+    for (i = 0; i < BACKOFF_NUMTRIES; i++)
+        avgresult += result[i];
+    avgresult /= BACKOFF_NUMTRIES;
+        /* calculate max. number of loops */
+    diff = avgresult - avgbaseline;
+    iterations = BACKOFF_UNIT * BACKOFF_TARGET / diff;
+        /* print */
+    fprintf(stderr, "baseline:\n");
+    for (i = 0; i < BACKOFF_NUMTRIES; i++)
+        fprintf(stderr, "#%d %f us\n", i, baseline[i]);
+    fprintf(stderr, "average: %f\n", avgbaseline);
+    fprintf(stderr, "results:\n");
+    for (i = 0; i < BACKOFF_NUMTRIES; i++)
+        fprintf(stderr, "#%d %f us\n", i, result[i]);
+    fprintf(stderr, "average: %f\n", avgresult);
+    fprintf(stderr, "---\n");
+    fprintf(stderr, "difference: %f\n", diff);
+    fprintf(stderr, "target: %f us\n", BACKOFF_TARGET);
+    fprintf(stderr, "iterations: %d\n", iterations);
+    fflush(stderr);
+}
+
+#endif
+
 typedef struct _dspthreadpool
 {
 #ifdef MSVC_INTERLOCKED
@@ -642,6 +701,10 @@ static void dspthreadpool_init(void)
             /* for thread pinning */
         if (sys_threadaffinity)
             parse_hardware_topology();
+    #if 0
+        if (sys_threadspin)
+            backoff_measure();
+    #endif
     }
 }
 
