@@ -223,6 +223,8 @@ typedef struct _block
     int x_taskonset;    /* beginning of parallel task in the chain */
     int x_tasklength;   /* length of parallel task */
     t_dsptaskqueue *x_dspqueue; /* maintain a DSP task queue and join tasks */
+    t_dsptask **x_childtasks;  /* child DSP tasks, see block_prolog() */
+    int x_numchildtasks;     /* number of child DSP tasks */
 #endif
     int x_upsample;     /* upsampling-factor */
     int x_downsample;   /* downsampling-factor */
@@ -249,6 +251,8 @@ static void *block_new(t_floatarg fvecsize, t_floatarg foverlap,
     x->x_taskonset = 0;
     x->x_tasklength = 0,
     x->x_dspqueue = 0;
+    x->x_childtasks = 0;
+    x->x_numchildtasks = 0;
 #endif
     block_set(x, fvecsize, foverlap, fupsample);
     return (x);
@@ -263,6 +267,8 @@ static void block_free(t_block *x)
         dsptask_free(x->x_task);
     if (x->x_dspqueue)
         dsptaskqueue_release(x->x_dspqueue);
+    if (x->x_childtasks)
+        freebytes(x->x_childtasks, x->x_numchildtasks * sizeof(t_dsptask *));
 #endif
 }
 
@@ -365,7 +371,21 @@ static t_int *block_prolog(t_int *w)
     int phase = x->x_phase;
         /* if we're switched off, jump past the epilog code */
     if (!x->x_switchon)
+    {
+    #if PD_DSPTHREADS
+        /* Notify child DSP tasks to prevent the owning DSP
+         * task queues (above this switch~) from locking up
+         * in dsptaskqueue_join(). See also ugen_addtask(). */
+        int i;
+    #if 0
+        if (x->x_numchildtasks)
+            fprintf(stderr, "switch~: skip %d tasks\n", x->x_numchildtasks);
+    #endif
+        for (i = 0; i < x->x_numchildtasks; i++)
+            dsptask_skip(x->x_childtasks[i]);
+    #endif
         return (w + x->x_blocklength);
+    }
     if (phase)
     {
         phase++;
@@ -399,6 +419,14 @@ static t_int *block_epilog(t_int *w)
 }
 
 #if PD_DSPTHREADS
+
+static void switch_addtask(t_block *x, t_dsptask *t)
+{
+    int old = x->x_numchildtasks++;
+    x->x_childtasks = resizebytes(x->x_childtasks,
+        old * sizeof(t_dsptask *), x->x_numchildtasks * sizeof(t_dsptask *));
+    x->x_childtasks[old] = t;
+}
 
 static void block_parallel(t_block *x, t_floatarg f)
 {
@@ -722,10 +750,47 @@ struct _dspcontext
     char dc_parallel;       /* true if we're parallel. */
 #if PD_DSPTHREADS
     t_dsptaskqueue *dc_dspqueue; /* current DSP task queue */
+    t_block *dc_block;      /* block~ object */
 #endif
 };
 
 #define t_dspcontext struct _dspcontext
+
+#if PD_DSPTHREADS
+
+t_dsptaskqueue * dsptask_getqueue(t_dsptask *x);
+
+void ugen_addtask(t_dsptask *x)
+{
+    t_dspcontext *dc, *dc2;
+    t_dsptaskqueue *queue = dsptask_getqueue(x);
+    /* Add the DSP task to all enclosing switch~ objects
+     * that are *below* the owning DSP task queue.
+     * If one of these subcanvases is switched off,
+     * the task will be notified; see block_prolog(). */
+    for (dc = THIS->u_context; dc; dc = dc->dc_parentcontext)
+    {
+        if (dc->dc_block && dc->dc_block->x_switched) /* switch~ */
+        {
+            /* try to find queue in outer contexts */
+            for (dc2 = dc->dc_parentcontext; dc2; dc2 = dc2->dc_parentcontext)
+            {
+                if (dc2->dc_dspqueue == queue)
+                {
+                    switch_addtask(dc->dc_block, x);
+                    break;
+                }
+            }
+        }
+    }
+}
+
+void ugen_removetask(t_dsptask *x)
+{
+
+}
+
+#endif /* PD_DSPTHREADS */
 
     /* get a new signal for the current context - used by clone~ object */
 t_signal *signal_newfromcontext(int borrowed)
@@ -839,6 +904,7 @@ t_dspcontext *ugen_start_graph(int toplevel, t_signal **sp,
      * by block~ (see "join") or by dsptaskqueue_push(). */
     dc->dc_dspqueue = THIS->u_context ? THIS->u_context->dc_dspqueue
         : THIS->u_dspqueue;
+    dc->dc_block = 0;
 #endif
     THIS->u_context = dc;
     return (dc);
@@ -1174,6 +1240,14 @@ void ugen_done_graph(t_dspcontext *dc)
                     reblock = 1;
         switched = blk->x_switched;
     #if PD_DSPTHREADS
+        dc->dc_block = blk;
+            /* free old DSP task list */
+        if (blk->x_childtasks)
+        {
+            freebytes(blk->x_childtasks, blk->x_numchildtasks * sizeof(t_dsptask *));
+            blk->x_childtasks = 0;
+            blk->x_numchildtasks = 0;
+        }
             /* always free existing DSP task! */
         if (blk->x_task)
         {

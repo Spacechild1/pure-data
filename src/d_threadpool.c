@@ -640,6 +640,9 @@ void dsp_add_join(t_dsptaskqueue *x)
 
 /* ---------------------------- t_dsptask ----------------------------- */
 
+void ugen_addtask(t_dsptask *x);
+void ugen_removetask(t_dsptask *x);
+
 struct _dsptask
 {
     t_lfs_node dt_node;
@@ -662,13 +665,20 @@ t_dsptask * dsptask_new(t_dsptaskqueue *queue, t_dsptaskfn fn, void *data)
     x->dt_fn = fn;
     x->dt_data = data;
     queue->dq_numtasks++; /* increment refcount */
+    ugen_addtask(x);
     return x;
 }
 
 void dsptask_free(t_dsptask *x)
 {
+    ugen_removetask(x);
     dsptaskqueue_release(x->dt_queue); /* release */
     freebytes(x, sizeof(t_dsptask));
+}
+
+t_dsptaskqueue * dsptask_getqueue(t_dsptask *x)
+{
+    return x->dt_queue;
 }
 
 void dsptask_sched(t_dsptask *x)
@@ -689,32 +699,41 @@ void dsptask_sched(t_dsptask *x)
     }
 }
 
-static void dsptask_run(t_dsptask *x, int index)
+static void dsptask_done(t_dsptask *x)
 {
     t_dsptaskqueue *queue = x->dt_queue;
-    int remaining;
-#ifdef DEBUG_DSPTHREADS
-    fprintf(stderr, "queue %p: run task %p on thread %d\n",
-        queue, x, index);
-#endif
-#ifdef PDINSTANCE
-    pd_setinstance(x->dt_pdinstance);
-#endif
-    (x->dt_fn)(x->dt_data);
 #ifdef MSVC_INTERLOCKED
-    remaining = _InterlockedDecrement(&queue->dq_remaining); /* returns new value! */
+    int remaining = _InterlockedDecrement(&queue->dq_remaining); /* returns new value! */
 #else
-    remaining = atomic_fetch_sub(&queue->dq_remaining, 1) - 1;
+    int remaining = atomic_fetch_sub(&queue->dq_remaining, 1) - 1;
 #endif
 #ifdef DEBUG_DSPTHREADS
     fprintf(stderr, "queue %p: %d remaining tasks\n", queue, remaining);
 #endif
     if (!remaining)
-    {
-        /* last task, notify waiting main audio thread;
-         * see dsptaskqueue_join() */
+        /* last task, notify waiting main audio thread */
         fast_semaphore_post(&queue->dq_sem);
-    }
+}
+
+static void dsptask_run(t_dsptask *x, int index)
+{
+#ifdef DEBUG_DSPTHREADS
+    fprintf(stderr, "queue %p: run task %p on thread %d\n",
+        x->dt_queue, x, index);
+#endif
+#ifdef PDINSTANCE
+    pd_setinstance(x->dt_pdinstance);
+#endif
+    (x->dt_fn)(x->dt_data);
+    dsptask_done(x);
+}
+
+void dsptask_skip(t_dsptask *x)
+{
+#ifdef DEBUG_DSPTHREADS
+    fprintf(stderr, "queue %p: skip task %p\n", x->dt_queue, x);
+#endif
+    dsptask_done(x);
 }
 
 #else /* PD_DSPTHREADS */
