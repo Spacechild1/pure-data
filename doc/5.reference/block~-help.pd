@@ -1,8 +1,8 @@
-#N canvas 576 23 531 684 12;
+#N canvas 576 23 531 733 12;
 #X text 34 248 You may have at most one block~/switch~ object in any
 window., f 67;
-#X text 15 597 see also:;
-#X obj 135 649 fft~;
+#X text 15 653 see also:;
+#X obj 135 705 fft~;
 #X text 34 367 Pd's default block size is 64 samples. The inlet~ and
 outlet~ objects reblock signals to adjust for differences between parent
 and subpatch \, but only power-of-two adjustments are possible. So
@@ -10,7 +10,6 @@ for "normal" audio computations \, all blocks should also be power-of-two
 in size. HOWEVER \, if you have no inlet~ or outlet~ you may specify
 any other block size. This is intended for later use in video processing.
 , f 67;
-#X text 318 649 updated for Pd version 0.43;
 #N canvas 424 281 492 272 block-interactions 0;
 #X text 32 49 Dac~ and adc~ don't work correctly if reblocked \, nor
 if a parent window is reblocked \, even if the window containing the
@@ -25,8 +24,8 @@ than they are \, there might be weirdness.;
 may be switched with impunity \, but not catch~., f 60;
 #X text 32 11 INTERACTIONS BETWEEN BLOCK~/SWITCH~ AND OTHER OBJECTS
 IN PD;
-#X restore 149 540 pd block-interactions;
-#X text 308 540 <= BUG! block~/switch~ and dac~/adc~ are incompatible
+#X restore 149 570 pd block-interactions;
+#X text 308 570 <= BUG! block~/switch~ and dac~/adc~ are incompatible
 , f 27;
 #N canvas 741 59 537 534 switch-example 0;
 #X obj 109 380 bang~;
@@ -72,7 +71,7 @@ reblocked.;
 #X connect 7 0 20 0;
 #X connect 8 0 20 0;
 #X connect 9 0 20 0;
-#X restore 150 489 pd switch-example;
+#X restore 150 519 pd switch-example;
 #N canvas 551 180 567 287 switch-bang 0;
 #X text 50 15 You can use the switch~ object to single-step dsp in
 a subpatch. This might be useful for block operations that don't want
@@ -92,19 +91,19 @@ to be synced to the sample clock: loading a window function in a table
 #X connect 1 0 7 0;
 #X connect 2 0 4 0;
 #X connect 2 0 7 0;
-#X restore 149 514 pd switch-bang;
-#X text 277 489 <= click and open example;
+#X restore 149 544 pd switch-bang;
+#X text 277 519 <= click and open example;
 #X obj 85 68 block~ 64 1 1;
 #X text 85 95 args: block size \, overlap \, up-downsampling;
-#X obj 87 597 ../3.audio.examples/G04.control.blocksize;
-#X obj 87 619 ../3.audio.examples/J07.oversampling;
-#X obj 46 489 tgl 17 0 empty empty empty 17 7 0 10 #fcfcfc #000000
+#X obj 87 653 ../3.audio.examples/G04.control.blocksize;
+#X obj 87 675 ../3.audio.examples/J07.oversampling;
+#X obj 46 519 tgl 17 0 empty empty empty 17 7 0 10 #fcfcfc #000000
 #000000 0 1;
-#X msg 46 522 \; pd dsp \$1;
-#X text 67 486 <= DSP on/off, f 6;
-#X obj 178 649 bang~;
-#X text 14 649 and the objects:;
-#X text 259 514 <= 'bang' lets you single-step DSP;
+#X msg 46 552 \; pd dsp \$1;
+#X text 67 516 <= DSP on/off, f 6;
+#X obj 178 705 bang~;
+#X text 14 705 and the objects:;
+#X text 259 544 <= 'bang' lets you single-step DSP;
 #X text 34 122 The block~ and switch~ objects set the block size \,
 overlap \, and up/down-sampling ratio for the patch window. (The overlap
 and resampling ratio are relative to the super-patch.), f 67;
@@ -150,7 +149,277 @@ up/downsampling)., f 66;
 #X restore 369 17 pd reference;
 #X text 5 16 [block~] and [switch~] -;
 #X text 188 9 set block size and on/off control for DSP, f 22;
-#X obj 5 583 cnv 1 520 1 empty empty empty 8 12 0 13 #000000 #000000
+#X obj 5 639 cnv 1 520 1 empty empty empty 8 12 0 13 #000000 #000000
 0;
 #X text 462 18 <= click;
-#X connect 14 0 15 0;
+#X text 35 474 Block~ also facilitates parallel DSP processing with
+the "parallel" and "join" messages., f 68;
+#N canvas 617 264 613 446 parallel-dsp 0;
+#X obj 43 252 block~;
+#X msg 43 62 parallel \$1;
+#X obj 43 41 tgl 15 0 empty empty empty 17 7 0 10 #fcfcfc #000000 #000000
+0 1;
+#X obj 60 197 tgl 15 0 empty empty empty 17 7 0 10 #fcfcfc #000000
+#000000 0 1;
+#X msg 60 217 join \$1;
+#X text 40 388 See also the "parallel" message for;
+#X obj 296 388 clone;
+#N canvas 425 76 499 300 pipelining 0;
+#N canvas 75 75 406 256 fx1 0;
+#X obj 57 103 inlet~;
+#X obj 57 140 bob~;
+#X obj 57 178 outlet~;
+#X obj 123 103 inlet~;
+#X obj 123 140 bob~;
+#X obj 123 178 outlet~;
+#X obj 212 121 loadbang;
+#X msg 212 149 parallel 1;
+#X obj 212 178 block~;
+#X obj 70 35 loadbang;
+#X msg 70 64 800;
+#X msg 148 67 1;
+#X connect 0 0 1 0;
+#X connect 1 0 2 0;
+#X connect 3 0 4 0;
+#X connect 4 0 5 0;
+#X connect 6 0 7 0;
+#X connect 7 0 8 0;
+#X connect 9 0 10 0;
+#X connect 9 0 11 0;
+#X connect 10 0 1 1;
+#X connect 10 0 4 1;
+#X connect 11 0 1 2;
+#X connect 11 0 4 2;
+#X restore 82 100 pd fx1;
+#X text 78 38 asynchronous pipelining:;
+#X obj 81 70 noise~;
+#X obj 132 70 noise~;
+#X obj 81 215 output~;
+#X msg 157 236 \; pd dsp \$1;
+#X obj 157 214 tgl 15 0 empty empty empty 17 7 0 10 #fcfcfc #000000
+#000000 0 1;
+#X text 139 101 <= click me;
+#X text 142 125 Although the 4 stages are nominally processed in series
+\, block~ + "parallel" make them run asynchronously. However \, because
+outlet~ is buffered \, each stage is delayed by 1 block., f 46;
+#N canvas 75 75 406 256 fx2 0;
+#X obj 57 103 inlet~;
+#X obj 57 140 bob~;
+#X obj 57 178 outlet~;
+#X obj 123 103 inlet~;
+#X obj 123 140 bob~;
+#X obj 123 178 outlet~;
+#X obj 212 121 loadbang;
+#X msg 212 149 parallel 1;
+#X obj 212 178 block~;
+#X obj 70 35 loadbang;
+#X msg 70 64 800;
+#X msg 148 66 1;
+#X connect 0 0 1 0;
+#X connect 1 0 2 0;
+#X connect 3 0 4 0;
+#X connect 4 0 5 0;
+#X connect 6 0 7 0;
+#X connect 7 0 8 0;
+#X connect 9 0 10 0;
+#X connect 9 0 11 0;
+#X connect 10 0 1 1;
+#X connect 10 0 4 1;
+#X connect 11 0 1 2;
+#X connect 11 0 4 2;
+#X restore 82 128 pd fx2;
+#N canvas 75 75 406 256 fx3 0;
+#X obj 57 103 inlet~;
+#X obj 57 140 bob~;
+#X obj 57 178 outlet~;
+#X obj 123 103 inlet~;
+#X obj 123 140 bob~;
+#X obj 123 178 outlet~;
+#X obj 212 121 loadbang;
+#X msg 212 149 parallel 1;
+#X obj 212 178 block~;
+#X obj 70 35 loadbang;
+#X msg 70 64 800;
+#X msg 148 67 0.1;
+#X connect 0 0 1 0;
+#X connect 1 0 2 0;
+#X connect 3 0 4 0;
+#X connect 4 0 5 0;
+#X connect 6 0 7 0;
+#X connect 7 0 8 0;
+#X connect 9 0 10 0;
+#X connect 9 0 11 0;
+#X connect 10 0 1 1;
+#X connect 10 0 4 1;
+#X connect 11 0 1 2;
+#X connect 11 0 4 2;
+#X restore 82 156 pd fx3;
+#N canvas 75 75 406 256 fx4 0;
+#X obj 57 103 inlet~;
+#X obj 57 140 bob~;
+#X obj 57 178 outlet~;
+#X obj 123 103 inlet~;
+#X obj 123 140 bob~;
+#X obj 123 178 outlet~;
+#X obj 212 121 loadbang;
+#X msg 212 149 parallel 1;
+#X obj 212 178 block~;
+#X obj 70 35 loadbang;
+#X msg 70 64 800;
+#X msg 148 67 1;
+#X connect 0 0 1 0;
+#X connect 1 0 2 0;
+#X connect 3 0 4 0;
+#X connect 4 0 5 0;
+#X connect 6 0 7 0;
+#X connect 7 0 8 0;
+#X connect 9 0 10 0;
+#X connect 9 0 11 0;
+#X connect 10 0 1 1;
+#X connect 10 0 4 1;
+#X connect 11 0 1 2;
+#X connect 11 0 4 2;
+#X restore 82 185 pd fx4;
+#X connect 0 0 9 0;
+#X connect 0 1 9 1;
+#X connect 2 0 0 0;
+#X connect 3 0 0 1;
+#X connect 6 0 5 0;
+#X connect 9 0 10 0;
+#X connect 9 1 10 1;
+#X connect 10 0 11 0;
+#X connect 10 1 11 1;
+#X connect 11 0 4 0;
+#X connect 11 1 4 1;
+#X restore 425 118 pd pipelining;
+#X text 137 85 Signal outlets are buffered \, so they always return
+the result of the *previous* block.;
+#X text 137 119 This allows for asynchronous pipelining:;
+#X text 137 193 Wait for all parallel subpatches/abstractions in this
+canvas to finish.;
+#X text 65 39 on/off;
+#X text 79 194 on/off;
+#N canvas 502 173 398 300 fork/join 0;
+#X text 52 37 fork/join;
+#N canvas 271 107 598 227 source 0;
+#X obj 40 140 outlet~;
+#N canvas 175 175 450 182 sub1 0;
+#X obj 280 103 block~;
+#X obj 280 47 loadbang;
+#X msg 280 74 parallel 1;
+#X obj 62 62 osc~ 440;
+#X obj 62 94 throw~ \$0-ch1;
+#X obj 169 62 osc~ 440;
+#X obj 169 94 throw~ \$0-ch2;
+#X connect 1 0 2 0;
+#X connect 2 0 0 0;
+#X connect 3 0 4 0;
+#X connect 5 0 6 0;
+#X restore 42 44 pd sub1;
+#N canvas 175 175 450 182 sub2 0;
+#X obj 280 103 block~;
+#X obj 280 47 loadbang;
+#X msg 280 74 parallel 1;
+#X obj 62 62 osc~ 440;
+#X obj 62 94 throw~ \$0-ch1;
+#X obj 169 62 osc~ 440;
+#X obj 169 94 throw~ \$0-ch2;
+#X connect 1 0 2 0;
+#X connect 2 0 0 0;
+#X connect 3 0 4 0;
+#X connect 5 0 6 0;
+#X restore 104 44 pd sub2;
+#N canvas 175 175 450 182 sub3 0;
+#X obj 280 103 block~;
+#X obj 280 47 loadbang;
+#X msg 280 74 parallel 1;
+#X obj 62 62 osc~ 440;
+#X obj 62 94 throw~ \$0-ch1;
+#X obj 169 62 osc~ 440;
+#X obj 169 94 throw~ \$0-ch2;
+#X connect 1 0 2 0;
+#X connect 2 0 0 0;
+#X connect 3 0 4 0;
+#X connect 5 0 6 0;
+#X restore 42 72 pd sub3;
+#N canvas 175 175 450 182 sub4 0;
+#X obj 280 103 block~;
+#X obj 280 47 loadbang;
+#X msg 280 74 parallel 1;
+#X obj 62 62 osc~ 440;
+#X obj 62 94 throw~ \$0-ch1;
+#X obj 169 62 osc~ 440;
+#X obj 169 94 throw~ \$0-ch2;
+#X connect 1 0 2 0;
+#X connect 2 0 0 0;
+#X connect 3 0 4 0;
+#X connect 5 0 6 0;
+#X restore 105 72 pd sub4;
+#X obj 172 147 block~;
+#X obj 172 46 loadbang;
+#X msg 172 120 join \$1;
+#X msg 172 70 1;
+#X obj 172 96 tgl 15 0 empty empty empty 17 7 0 10 #fcfcfc #000000
+#000000 0 1;
+#X text 242 67 disabling the "join" will mess up the output because
+the throw~ objects in the parallel subpatches write to the corresponding
+catch~ objects at random times \, sometimes before \, sometimes after
+the latter are processed., f 46;
+#X connect 6 0 8 0;
+#X connect 7 0 5 0;
+#X connect 8 0 9 0;
+#X connect 9 0 7 0;
+#X restore 57 73 pd source;
+#N canvas 486 479 457 212 fx 0;
+#X obj 50 49 inlet~;
+#X obj 49 148 outlet~;
+#X obj 151 148 outlet~;
+#X obj 49 85 catch~ \$0-ch1;
+#X obj 151 85 catch~ \$0-ch2;
+#X obj 49 118 bob~;
+#X obj 151 115 bob~;
+#X obj 163 27 loadbang;
+#X msg 163 51 12000;
+#X connect 3 0 5 0;
+#X connect 4 0 6 0;
+#X connect 5 0 1 0;
+#X connect 6 0 2 0;
+#X connect 7 0 8 0;
+#X connect 8 0 5 1;
+#X connect 8 0 6 1;
+#X restore 57 148 pd fx;
+#X text 67 107 dummy connection to enforce ordering (to avoid delay)
+, f 27;
+#X obj 58 179 output~;
+#X text 107 148 <= catch and process signals;
+#X text 134 72 <= generate signals in parallel and join them, f 24
+;
+#X connect 1 0 2 0;
+#X connect 2 0 4 0;
+#X connect 2 1 4 1;
+#X restore 479 261 pd fork/join;
+#X text 136 228 This is handy if you want to join parallel subpatches
+for further processing. By using throw~/catch~ instead of outlet~ \,
+you can even do this without any delay:, f 58;
+#N canvas 182 294 450 300 nesting 0;
+#X text 139 138 TODO nesting example;
+#X restore 297 295 pd nesting;
+#X text 36 295 "parallel" and "join" can be nested:;
+#X text 40 326 NOTE: "parallel" only works if all DSP objects starting
+from the nearest outer "join" point are "officially" thread-safe. You
+can circumvent this check by starting Pd with -nothreadsafe., f 74
+;
+#X text 138 142 NOTE: "parallel" canvases themselves cannot use reblocking
+\, upsampling or overlap \, but subpatches/abstractions can!, f 60
+;
+#X text 138 36 Process a canvas in parallel. The canvas will effectively
+run asynchronously until it is joined by an outer canvas (see below)
+- or at the end of the DSP tick.;
+#X connect 1 0 0 0;
+#X connect 2 0 1 0;
+#X connect 3 0 4 0;
+#X connect 4 0 0 0;
+#X restore 149 606 pd parallel-dsp;
+#X text 267 606 <= parallel DSP processing;
+#X text 314 705 updated for Pd version 0.52-2;
+#X connect 13 0 14 0;
