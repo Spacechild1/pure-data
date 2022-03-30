@@ -531,6 +531,7 @@ int sys_dspthread_run(int index)
 struct _dsptaskqueue
 {
     int dq_numtasks; /* number of tasks, also doubles as reference count */
+    int dq_numswitchoff; /* number of switched of tasks */
 #ifdef MSVC_INTERLOCKED
     long dq_remaining;
 #else
@@ -543,6 +544,7 @@ t_dsptaskqueue * dsptaskqueue_new(void)
 {
     t_dsptaskqueue *x = (t_dsptaskqueue *)getbytes(sizeof(t_dsptaskqueue));
     x->dq_numtasks = 0;
+    x->dq_numswitchoff = 0;
     x->dq_remaining = 0;
     fast_semaphore_init(&x->dq_sem);
     return x;
@@ -553,25 +555,43 @@ t_dsptaskqueue * dsptaskqueue_new(void)
 void dsptaskqueue_release(t_dsptaskqueue *x)
 {
     int oldcount = x->dq_numtasks--;
-    if (oldcount < 0)
-        bug("dsptaskqueue_free");
-    else if (oldcount == 0)
+    if (oldcount > 0)
     {
+    #ifdef DEBUG_DSPTHREADS
+        fprintf(stderr, "queue %p: %d tasks (%d switched off)\n",
+            x, oldcount-1, x->dq_numswitchoff);
+    #endif
+    }
+    else if (oldcount == 0) /* release queue */
+    {
+        if (x->dq_numswitchoff != 0)
+            bug("dsptaskqueue_release: bad switch count (%d)",
+                x->dq_numswitchoff);
+    #ifdef DEBUG_DSPTHREADS
+        fprintf(stderr, "queue %p: release\n");
+    #endif
         fast_semaphore_destroy(&x->dq_sem);
         freebytes(x, sizeof(t_dsptaskqueue));
     }
+    else if (oldcount < 0)
+        bug("dsptaskqueue_release: bad refcount (%d)", oldcount);
 }
 
 void dsptaskqueue_reset(t_dsptaskqueue *x)
 {
-    if (x->dq_numtasks > 0)
+    int count = x->dq_numtasks - x->dq_numswitchoff;
+    if (count > 0)
     {
-        x->dq_remaining = x->dq_numtasks;
+        x->dq_remaining = count;
     #ifdef DEBUG_DSPTHREADS
-        fprintf(stderr, "queue %p: reset with %d tasks\n",
-            x, x->dq_numtasks);
+        fprintf(stderr, "queue %p: reset with %d active tasks "
+            "(%d total, %d switched off)\n",
+            x, count, x->dq_numtasks, x->dq_numswitchoff);
     #endif
     }
+    else if (count < 0)
+        fprintf(stderr, "dsptaskqueue_reset: queue %p: bad task count (%d)\n",
+            x, count);
 }
 
 static t_int *dsptaskqueue_doreset(t_int *w)
@@ -588,12 +608,11 @@ void dsp_add_reset(t_dsptaskqueue *x)
 
 void dsptaskqueue_join(t_dsptaskqueue *x)
 {
-    if (!d_threadpool || !d_threadpool->tp_n)
-        /* single-threaded -> nothing to do, see dsptask_sched() */
+    int count = x->dq_numtasks - x->dq_numswitchoff;
+    assert(count >= 0);
+    if (!d_threadpool || !d_threadpool->tp_n || !count)
+        /* single-threaded or no tasks, see also dsptask_sched() */
         return;
-    if (!x->dq_numtasks) /* no tasks */
-        return;
-    /* multi-threaded */
 #ifdef DEBUG_DSPTHREADS
     fprintf(stderr, "queue %p: begin join\n", x);
 #endif
@@ -640,6 +659,8 @@ void dsp_add_join(t_dsptaskqueue *x)
 
 /* ---------------------------- t_dsptask ----------------------------- */
 
+void ugen_addtask(t_dsptask *x);
+
 struct _dsptask
 {
     t_lfs_node dt_node;
@@ -649,6 +670,7 @@ struct _dsptask
     t_dsptaskqueue *dt_queue;
     t_dsptaskfn dt_fn;
     void *dt_data;
+    int dt_switchoff;
 };
 
 t_dsptask * dsptask_new(t_dsptaskqueue *queue, t_dsptaskfn fn, void *data)
@@ -661,13 +683,26 @@ t_dsptask * dsptask_new(t_dsptaskqueue *queue, t_dsptaskfn fn, void *data)
     x->dt_queue = queue;
     x->dt_fn = fn;
     x->dt_data = data;
+    x->dt_switchoff = 0;
     queue->dq_numtasks++; /* increment refcount */
+#ifdef DEBUG_DSPTHREADS
+    fprintf(stderr, "queue %p: %d tasks (%d switched off)\n",
+        queue, queue->dq_numtasks, queue->dq_numswitchoff);
+#endif
+    ugen_addtask(x);
     return x;
 }
 
 void dsptask_free(t_dsptask *x)
 {
-    dsptaskqueue_release(x->dt_queue); /* release */
+    /* make sure to decrement switch count! */
+    if (x->dt_switchoff > 0)
+    {
+        if (--x->dt_queue->dq_numswitchoff < 0)
+            bug("dsptask_free: bad queue switch count (%d)",
+                x->dt_queue->dq_numswitchoff);
+    }
+    dsptaskqueue_release(x->dt_queue);
     freebytes(x, sizeof(t_dsptask));
 }
 
@@ -681,10 +716,10 @@ void dsptask_sched(t_dsptask *x)
         dspthreadpool_push(x);
         fast_semaphore_post(&d_threadpool->tp_sem);
     }
-    else
+    else /* single-threaded */
     {
         /* execute immediately, see dsptaskqueue_join().
-         * NOTE: don't use dsptask_run() here! */
+         * NB: don't use dsptask_run() here! */
         (x->dt_fn)(x->dt_data);
     }
 }
@@ -700,7 +735,10 @@ static void dsptask_run(t_dsptask *x, int index)
 #ifdef PDINSTANCE
     pd_setinstance(x->dt_pdinstance);
 #endif
+    assert(x->dt_switchoff == 0);
+    /* execute task */
     (x->dt_fn)(x->dt_data);
+    /* atomically decrement task counter */
 #ifdef MSVC_INTERLOCKED
     remaining = _InterlockedDecrement(&queue->dq_remaining); /* returns new value! */
 #else
@@ -709,11 +747,56 @@ static void dsptask_run(t_dsptask *x, int index)
 #ifdef DEBUG_DSPTHREADS
     fprintf(stderr, "queue %p: %d remaining tasks\n", queue, remaining);
 #endif
-    if (!remaining)
+    if (!remaining) /* last task */
     {
         /* last task, notify waiting main audio thread;
          * see dsptaskqueue_join() */
         fast_semaphore_post(&queue->dq_sem);
+    }
+    else if (remaining < 0)
+        fprintf(stderr, "queue: %p: bad remaining task count (%d)\n",
+            queue, remaining);
+}
+
+/* This is called whenever an enclosing switch~ object has changed state.
+ * Note that there can be several switch~ objects beyond this task;
+ * as soon as one of them is switched off, the DSP task won't run and it
+ * must notify the queue and DSP context to prevent them from locking up.
+ * Conversely, *all* enclosing switch~ objects must be switched on for
+ * the task to run (again), i.e. the counter must reach 0. */
+void dsptask_switch(t_dsptask *x, int on)
+{
+    t_dsptaskqueue *queue = x->dt_queue;
+    int state, oldstate = x->dt_switchoff > 0;
+    if (on)
+    {
+        if (--x->dt_switchoff < 0)
+            bug("dsptask_switch: bad switch count (%d)", x->dt_switchoff);
+    }
+    else
+        x->dt_switchoff++;
+
+    state = x->dt_switchoff > 0;
+    if (oldstate != state)
+    {
+        /* only notify if the state has changed! */
+    #ifdef DEBUG_DSPTHREADS
+        fprintf(stderr, "queue %p: switch %s task %p \n",
+            x->dt_queue, (on ? "on" : "off"), x);
+    #endif
+        if (on) /* off -> on */
+        {
+            if (--queue->dq_numswitchoff < 0)
+                bug("dsptask_switch: bad queue switch count (%d)",
+                    queue->dq_numswitchoff);
+        }
+        else /* on -> off */
+        {
+            if (++queue->dq_numswitchoff > queue->dq_numtasks)
+                bug("dsptask_switch: queue switch count (%d) "
+                    "exceeds queue task count (%d)",
+                        queue->dq_numswitchoff, queue->dq_numtasks);
+        }
     }
 }
 

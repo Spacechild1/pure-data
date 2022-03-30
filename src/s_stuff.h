@@ -414,6 +414,7 @@ typedef void (*t_dsptaskfn) (void *data);
 t_dsptask * dsptask_new(t_dsptaskqueue *queue, t_dsptaskfn fn, void *data);
 void dsptask_free(t_dsptask *x);
 void dsptask_sched(t_dsptask *x);
+void dsptask_switch(t_dsptask *x, int on);
 
 #endif /* PD_DSPTHREADS */
 
