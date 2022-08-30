@@ -746,10 +746,9 @@ EXTERN int garrayref_check(t_garrayref *x);
 /* for control objects: safely access array data. If the reference is empty or
  * stale, (re)acquire the array by name; if 'arrayname' is NULL, fail silently.
  * Returns 1 if it could get the array data; otherwise returns 0.
- *
  * If you want to set the garrayref to another garray, you must either call
- * garray_set() with the new name, or call garray_unset() and lazily initialize
- * it in the next call to garrayref_get(). */
+ * garray_set() with the new name, or call garray_unset() and acquire it lazily
+ * with the next call to garrayref_get(). */
 EXTERN int garrayref_get(t_garrayref *x, int *size, t_word **vec, t_symbol *arrayname, t_object *object);
 /* for DSP objects: lock/unlock garray for reading/writing in the perform routine.
  * Returns 1 if it could get the array data and lock the garray; otherwise returns 0.
@@ -760,6 +759,7 @@ THREADSAFE EXTERN void garrayref_write_unlock(t_garrayref *x);
 THREADSAFE EXTERN int garrayref_read_lock(t_garrayref *x, int *size, t_word **vec);
 THREADSAFE EXTERN void garrayref_read_unlock(t_garrayref *x);
 #else
+/* optimization for non-parallel builds */
 #define garrayref_write_lock(x, size, vec) garrayref_get(x, size, vec, 0, 0)
 #define garrayref_write_unlock(x)
 #define garrayref_read_lock(x, size, vec) garrayref_get(x, size, vec, 0, 0)

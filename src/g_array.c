@@ -866,10 +866,9 @@ int garrayref_get(t_garrayref *x, int *size, t_word **vec,
     /* garrayref_write_lock() and garrayref_read_lock() always fail
      * silently if garrayref is empty or if the garray has been removed.
      * In practice, adding/removing garrays triggers a DSP graph update,
-     * so we automatically try to reacquire the garray in our DSP method
-     * by calling garrayref_set().
+     * so we can (re)acquire the garray in our DSP method with garrayref_set().
      * NOTE: we avoid (un)setting the garrayref in the perform routine
-     * because it would make things more complicated wrt thread-safety. */
+     * because it would require additional thread synchronization. */
 int garrayref_write_lock(t_garrayref *x, int *size, t_word **vec)
 {
     if (!garrayref_get(x, size, vec, 0, 0))
