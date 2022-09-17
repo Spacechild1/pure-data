@@ -58,6 +58,7 @@ int sys_guisetportnumber;   /* if started from the GUI, this is the port # */
 int sys_nosleep = 0;    /* skip all "sleep" calls and spin instead */
 int sys_defeatrt;       /* flag to cancel real-time */
 int sys_threadsafe = 1; /* only allow thread-safe DSP objects in parallel processing */
+int sys_threadaffinity = 0; /* pin DSP threads to CPUs */
 int sys_threadspinwait = 0; /* DSP threads spin while waiting for tasks */
 t_symbol *sys_flags;    /* more command-line flags */
 
@@ -426,6 +427,10 @@ static char *(usagemessage[]) = {
 "                    (potentially dangerous!)\n",
 "-spinwait        -- audio threads spin while waiting for tasks\n",
 "-nospinwait      -- audio threads do not spin (true by default)\n",
+#if defined(_WIN32) || defined(__linux__)
+"-affinity        -- pin audio threads to CPUs\n",
+"-noaffinity      -- do not pin audio threads (true by default)\n",
+#endif /* Windows/Linux */
 #endif /* PD_DSPTHREADS */
 "-listdev         -- list audio and MIDI devices\n",
 
@@ -1367,6 +1372,18 @@ int sys_argparse(int argc, const char **argv)
             sys_threadspinwait = 0;
             argc--; argv++;
         }
+#if defined(_WIN32) || defined(__linux__)
+        else if (!strcmp(*argv, "-affinity"))
+        {
+            sys_threadaffinity = 1;
+            argc--; argv++;
+        }
+        else if (!strcmp(*argv, "-noaffinity"))
+        {
+            sys_threadaffinity = 0;
+            argc--; argv++;
+        }
+#endif /* Windows/Linux */
 #endif /* PD_DSPTHREADS */
         else if (!strcmp(*argv, "-sleep"))
         {
