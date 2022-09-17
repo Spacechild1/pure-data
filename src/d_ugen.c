@@ -93,6 +93,8 @@ struct _instanceugen
 #if PD_DSPTHREADS
     t_dsptaskqueue *u_dspqueue; /* global DSP thread queue */
     t_lockfree_stack u_clocks; /* deferred clocks */
+    int u_numtasks;            /* total number of active DSP tasks */
+    int u_numswitchtasks;      /* number of switched off DSP tasks */
 #endif
 };
 
@@ -107,6 +109,8 @@ void d_ugen_newpdinstance(void)
 #if PD_DSPTHREADS
     THIS->u_dspqueue = dsptaskqueue_new(0);
     lockfree_stack_init(&THIS->u_clocks);
+    THIS->u_numtasks = 0;
+    THIS->u_numswitchtasks = 0;
 #endif
 }
 
@@ -540,6 +544,7 @@ void dsp_addv(t_perfroutine f, int n, t_int *vec)
 #if PD_DSPTHREADS
 void clock_dispatch(t_clock *x);
 void dspthread_setindex(int index);
+void dspthreadpool_tick(int ntasks);
 #endif
 
 void dsp_tick(void)
@@ -549,8 +554,16 @@ void dsp_tick(void)
         t_int *ip;
     #if PD_DSPTHREADS
         t_clock *c;
-        dspthread_setindex(0); /* just to be sure */
-        dsptaskqueue_reset(THIS->u_dspqueue);
+        int count = THIS->u_numtasks - THIS->u_numswitchtasks;
+        if (count >= 0)
+        {
+            dspthread_setindex(0); /* just to be sure */
+            dspthreadpool_tick(count);
+            dsptaskqueue_reset(THIS->u_dspqueue);
+        }
+        else
+            bug("dsp_tick: bad task count (%d) resp. switch count (%d)",
+                THIS->u_numtasks, THIS->u_numswitchtasks);
     #endif
         for (ip = THIS->u_dspchain; ip; ) ip = (*(t_perfroutine)(*ip))(ip);
         THIS->u_phase++;
@@ -764,12 +777,38 @@ struct _dspcontext
 void ugen_addtask(t_dsptask *x)
 {
     t_dspcontext *dc;
+    THIS->u_numtasks++;
     /* Add the DSP task to all enclosing switch~ objects */
     for (dc = THIS->u_context; dc; dc = dc->dc_parentcontext)
     {
         if (dc->dc_block && dc->dc_block->x_switched) /* switch~ */
             switch_addtask(dc->dc_block, x);
     }
+}
+
+void ugen_removetask(t_dsptask *x, int on)
+{
+    if (!on)
+    {
+        if (--THIS->u_numswitchtasks < 0)
+            bug("ugen_removetask: bad switch count (%d)",
+                THIS->u_numswitchtasks);
+    }
+    if (--THIS->u_numtasks < 0)
+        bug("ugen_removetask: bad task count (%d)",
+            THIS->u_numtasks);
+}
+
+/* DSP task has been switched on or off */
+void ugen_switchtask(t_dsptask *x, int on)
+{
+    if (on) /* off -> on */
+    {
+        if (--THIS->u_numswitchtasks < 0)
+            bug("block_float");
+    }
+    else /* on -> off */
+        THIS->u_numswitchtasks++;
 }
 
     /* used in clone_dsp() */

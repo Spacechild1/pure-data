@@ -55,9 +55,10 @@ int sys_noloadbang;
 static int sys_dontstartgui;
 int sys_hipriority = -1;    /* -1 = not specified; 0 = no; 1 = yes */
 int sys_guisetportnumber;   /* if started from the GUI, this is the port # */
-int sys_nosleep = 0;  /* skip all "sleep" calls and spin instead */
+int sys_nosleep = 0;    /* skip all "sleep" calls and spin instead */
 int sys_defeatrt;       /* flag to cancel real-time */
 int sys_threadsafe = 1; /* only allow thread-safe DSP objects in parallel processing */
+int sys_threadspinwait = 0; /* DSP threads spin while waiting for tasks */
 t_symbol *sys_flags;    /* more command-line flags */
 
 const char *sys_guicmd;
@@ -423,7 +424,9 @@ static char *(usagemessage[]) = {
 "                    \"officially\" thread-safe (true by default)\n",
 "-nothreadsafe    -- do not check if DSP objects are thread-safe\n"
 "                    (potentially dangerous!)\n",
-#endif
+"-spinwait        -- audio threads spin while waiting for tasks\n",
+"-nospinwait      -- audio threads do not spin (true by default)\n",
+#endif /* PD_DSPTHREADS */
 "-listdev         -- list audio and MIDI devices\n",
 
 #ifdef USEAPI_OSS
@@ -1354,7 +1357,17 @@ int sys_argparse(int argc, const char **argv)
             sys_threadsafe = 0;
             argc--; argv++;
         }
-#endif
+        else if (!strcmp(*argv, "-spinwait"))
+        {
+            sys_threadspinwait = 1;
+            argc--; argv++;
+        }
+        else if (!strcmp(*argv, "-nospinwait"))
+        {
+            sys_threadspinwait = 0;
+            argc--; argv++;
+        }
+#endif /* PD_DSPTHREADS */
         else if (!strcmp(*argv, "-sleep"))
         {
             sys_nosleep = 0;

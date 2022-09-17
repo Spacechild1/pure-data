@@ -445,6 +445,29 @@ static void dspthread_setrealtime(int index)
 
 /* -------------------------- t_dspthreadpool --------------------------- */
 
+typedef struct _backoff
+{
+    int b_n;
+} t_backoff;
+
+#define BACKOFF_MINLOOPS 16
+#define BACKOFF_MAXLOOPS 4096
+
+void backoff_reset(t_backoff *x)
+{
+    x->b_n = BACKOFF_MINLOOPS;
+}
+
+void backoff_perform(t_backoff *x)
+{
+    int i, n = x->b_n;
+    for (i = 0; i < n; i++)
+        pause_cpu();
+    x->b_n *= 2;
+    if (x->b_n > BACKOFF_MAXLOOPS)
+        x->b_n = BACKOFF_MAXLOOPS;
+}
+
 typedef struct _dspthreadpool
 {
 #ifdef MSVC_INTERLOCKED
@@ -456,6 +479,11 @@ typedef struct _dspthreadpool
     pthread_t *tp_threads;
     t_lockfree_stack tp_tasks;
     t_fast_semaphore tp_sem;
+#ifdef MSVC_INTERLOCKED
+    long tp_remaining;
+#else
+    atomic_int tp_remaining;
+#endif
 } t_dspthreadpool;
 
 static t_dspthreadpool *d_threadpool = NULL;
@@ -504,6 +532,10 @@ static void dspthreadpool_init(void)
         d_threadpool->tp_threads = 0;
         lockfree_stack_init(&d_threadpool->tp_tasks);
         fast_semaphore_init(&d_threadpool->tp_sem);
+        d_threadpool->tp_remaining = 0;
+            /* for thread pinning */
+        if (sys_threadaffinity)
+            parse_hardware_topology();
     }
 }
 
@@ -564,11 +596,11 @@ int sys_dspthreadpool_start(int *numthreads, int external)
     }
     else /* use internal DSP threads */
     {
-        if (n > 0)
+        if (n > 0) /* multi-threaded */
         {
             d_threadpool->tp_threads = (pthread_t *)getbytes(sizeof(pthread_t) * n);
             d_threadpool->tp_n = n;
-            /* spawn new threads; thread index starts at 1 */
+            /* spawn new threads; index for DSP helper threads starts at 1 */
             for (int i = 0; i < n; ++i)
                 pthread_create(&d_threadpool->tp_threads[i],
                     NULL, thread_function, (void *)(intptr_t)(i + 1));
@@ -590,6 +622,30 @@ int sys_dspthreadpool_stop(int external)
     dspthreadpool_stop(external);
     pd_globalunlock();
     return 1;
+}
+
+void dspthreadpool_tick(int ntasks)
+{
+    if (ntasks > 0 && sys_threadspinwait && d_threadpool && d_threadpool->tp_n)
+    {
+        /* use atomic increment, so it also works with PDINSTANCE! */
+    #ifdef MSVC_INTERLOCKED
+        int prev = _InterlockedExchangeAdd(&d_threadpool->tp_remaining,
+            ntasks);
+    #else
+        int prev = atomic_fetch_add(&d_threadpool->tp_remaining, ntasks);
+    #endif
+        /* only notify DSP helper threads if necessary */
+        if (prev == 0)
+            fast_semaphore_postn(&d_threadpool->tp_sem, d_threadpool->tp_n);
+    #ifdef DEBUG_DSPTHREADS
+        fprintf(stderr, "-- DSP thread pool: start tick with %d active tasks\n", ntasks);
+    #endif
+    #ifndef PDINSTANCE
+        if (prev != 0)
+            pd_error(0, "DSP thread pool: bad task count (%d)", prev);
+    #endif
+    }
 }
 
 static void dspthreadpool_push(t_dsptask *task)
@@ -619,14 +675,42 @@ static void dspthread_dorun(int index)
 #ifdef MSVC_INTERLOCKED
     while (d_threadpool->tp_running)
 #else
-    while (atomic_load_explicit(&d_threadpool->tp_running, memory_order_relaxed))
+    while (atomic_load_explicit(&d_threadpool->tp_running,
+            memory_order_relaxed))
 #endif
     {
-        /* run as many tasks as possible */
+            /* run as many tasks as possible */
         t_dsptask *t;
-        while ((t = dspthreadpool_pop()))
-            dsptask_run(t, index);
-        /* wait for more tasks (or quit) */
+        if (sys_threadspinwait) /* spin */
+        {
+            int remaining;
+            t_backoff backoff;
+            backoff_reset(&backoff);
+        tryagain:
+            while ((t = dspthreadpool_pop()))
+            {
+                dsptask_run(t, index);
+                backoff_reset(&backoff);
+            }
+        #ifdef MSVC_INTERLOCKED
+            remaining = d_threadpool->tp_remaining);
+        #else
+            remaining = atomic_load_explicit(
+                &d_threadpool->tp_remaining, memory_order_acquire);
+        #endif
+            if (remaining > 0)
+            {
+                backoff_perform(&backoff);
+                goto tryagain;
+            }
+            /* wait for next tick (or quit) */
+        }
+        else /* wait */
+        {
+            while ((t = dspthreadpool_pop()))
+                dsptask_run(t, index);
+            /* wait for more tasks (or quit) */
+        }
     #ifdef DEBUG_DSPTHREADS
         fprintf(stderr, "DSP thread %d: wait\n", index);
     #endif
@@ -676,7 +760,7 @@ struct _dsptaskqueue
 #else
     atomic_int dq_remaining;
 #endif
-    t_fast_semaphore dq_sem;
+    t_fast_semaphore dq_sem; /* not needed for spinning */
     t_canvas *dq_owner; /* canvas or NULL */
     char dq_threadsafe;
     char dq_warned;
@@ -688,7 +772,8 @@ t_dsptaskqueue * dsptaskqueue_new(t_canvas *owner)
     x->dq_numtasks = 0;
     x->dq_numswitchoff = 0;
     x->dq_remaining = 0;
-    fast_semaphore_init(&x->dq_sem);
+    if (!sys_threadspinwait)
+        fast_semaphore_init(&x->dq_sem);
     x->dq_owner = owner;
     x->dq_threadsafe = 0;
     x->dq_warned = 0;
@@ -715,7 +800,8 @@ void dsptaskqueue_release(t_dsptaskqueue *x)
     #ifdef DEBUG_DSPTHREADS
         fprintf(stderr, "queue %p: release\n");
     #endif
-        fast_semaphore_destroy(&x->dq_sem);
+        if (!sys_threadspinwait)
+            fast_semaphore_destroy(&x->dq_sem);
         freebytes(x, sizeof(t_dsptaskqueue));
     }
     else if (oldcount < 0)
@@ -798,23 +884,58 @@ void dsptaskqueue_join(t_dsptaskqueue *x)
      * NB: if PDINSTANCE defined, we might actually run tasks that
      * belong to other Pd instances! LATER decide if we should push
      * such tasks back to the queue? */
-    while (!fast_semaphore_trywait(&x->dq_sem))
+    if (sys_threadspinwait) /* spin */
     {
-        /* Pop and run a *single* task, then try again.
-         * Unlike in dspthread_dorun(), we do not pop tasks in a loop
-         * because we might end up running tasks that don't belong to
-         * this queue (and have a much later deadline). */
-        t_dsptask *t = dspthreadpool_pop();
-        if (t)
-            dsptask_run(t, 0);
-        else
+        t_backoff backoff;
+        backoff_reset(&backoff);
+    #ifdef MSVC_INTERLOCKED
+        while (x->dq_remaining)
+    #else
+        while (atomic_load_explicit(&x->dq_remaining,
+                memory_order_relaxed))
+    #endif
         {
-            /* nothing to do, wait */
-        #ifdef DEBUG_DSPTHREADS
-            fprintf(stderr, "queue %p: wait\n", x);
-        #endif
-            fast_semaphore_wait(&x->dq_sem);
-            break; /* ! */
+            /* Pop and run a *single* task, then try again.
+             * Unlike in dspthread_dorun(), we do not pop tasks in a loop
+             * because we might end up running tasks that don't belong to
+             * this queue (and have a much later deadline). */
+            t_dsptask *t = dspthreadpool_pop();
+            if (t)
+            {
+                dsptask_run(t, 0);
+                backoff_reset(&backoff);
+            }
+            else
+                backoff_perform(&backoff);
+        }
+        /* decrement global task counter.
+        /* NB: we *could* simply decrement all tasks at once in dsp_tick(),
+         * but then the DSP helper threads would always spin for the whole
+         * duration of the tick. By doing it here we make sure that they
+         * go to sleep as soon as all tasks have finished. */
+    #ifdef MSVC_INTERLOCKED
+        _InterlockedExchangeAdd(&d_threadpool->tp_remaining, -count);
+    #else
+        atomic_fetch_sub_explicit(&d_threadpool->tp_remaining, count,
+            memory_order_release);
+    #endif
+    }
+    else /* wait */
+    {
+        while (!fast_semaphore_trywait(&x->dq_sem))
+        {
+            /* Pop and run a *single* task, see explanation above. */
+            t_dsptask *t = dspthreadpool_pop();
+            if (t)
+                dsptask_run(t, 0);
+            else
+            {
+            #ifdef DEBUG_DSPTHREADS
+                fprintf(stderr, "queue %p: wait\n", x);
+            #endif
+                fast_semaphore_wait(&x->dq_sem);
+                break; /* ! */
+            }
         }
     }
 #ifdef DEBUG_DSPTHREADS
@@ -837,6 +958,8 @@ void dsp_add_join(t_dsptaskqueue *x)
 /* ---------------------------- t_dsptask ----------------------------- */
 
 void ugen_addtask(t_dsptask *x);
+void ugen_removetask(t_dsptask *x, int on);
+void ugen_switchtask(t_dsptask *x, int on);
 
 struct _dsptask
 {
@@ -879,6 +1002,8 @@ void dsptask_free(t_dsptask *x)
             bug("dsptask_free: bad queue switch count (%d)",
                 x->dt_queue->dq_numswitchoff);
     }
+    /* remove and free */
+    ugen_removetask(x, x->dt_switchoff == 0);
     dsptaskqueue_release(x->dt_queue);
     freebytes(x, sizeof(t_dsptask));
 }
@@ -891,7 +1016,8 @@ void dsptask_sched(t_dsptask *x)
         fprintf(stderr, "queue %p: sched task %p\n", x->dt_queue, x);
     #endif
         dspthreadpool_push(x);
-        fast_semaphore_post(&d_threadpool->tp_sem);
+        if (!sys_threadspinwait)
+            fast_semaphore_post(&d_threadpool->tp_sem);
     }
     else /* single-threaded */
     {
@@ -926,12 +1052,15 @@ static void dsptask_run(t_dsptask *x, int index)
 #endif
     if (!remaining) /* last task */
     {
-        /* last task, notify waiting main audio thread;
-         * see dsptaskqueue_join() */
-        fast_semaphore_post(&queue->dq_sem);
+        if (!sys_threadspinwait) /* wait */
+        {
+            /* last task, notify waiting main audio thread;
+             * see dsptaskqueue_join() */
+            fast_semaphore_post(&queue->dq_sem);
+        }
     }
     else if (remaining < 0)
-        fprintf(stderr, "queue: %p: bad remaining task count (%d)\n",
+        fprintf(stderr, "dsptask_run: queue %p: bad remaining task count (%d)\n",
             queue, remaining);
 }
 
@@ -966,6 +1095,7 @@ void dsptask_switch(t_dsptask *x, int on)
             if (--queue->dq_numswitchoff < 0)
                 bug("dsptask_switch: bad queue switch count (%d)",
                     queue->dq_numswitchoff);
+            ugen_switchtask(x, 1);
         }
         else /* on -> off */
         {
@@ -973,6 +1103,7 @@ void dsptask_switch(t_dsptask *x, int on)
                 bug("dsptask_switch: queue switch count (%d) "
                     "exceeds queue task count (%d)",
                         queue->dq_numswitchoff, queue->dq_numtasks);
+            ugen_switchtask(x, 0);
         }
     }
 }
