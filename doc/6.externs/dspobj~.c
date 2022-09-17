@@ -58,7 +58,7 @@ static void *dspobj_new(void)
 void dspobj_tilde_setup(void)
 {
     dspobj_class = class_new(gensym("dspobj~"), (t_newmethod)dspobj_new, 0,
-    	sizeof(t_dspobj), 0, A_DEFFLOAT, 0);
+        sizeof(t_dspobj), CLASS_DEFAULT, A_DEFFLOAT, 0);
 	    /* this is magic to declare that the leftmost, "main" inlet
 	    takes signals; other signal inlets are done differently... */
     CLASS_MAINSIGNALIN(dspobj_class, t_dspobj, x_f);

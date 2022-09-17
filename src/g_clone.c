@@ -1,6 +1,7 @@
 #include "m_pd.h"
 #include "g_canvas.h"
 #include "m_imp.h"
+#include "s_stuff.h"
 #include <string.h>
 
 /* ---------- clone - maintain copies of a patch ----------------- */
@@ -22,10 +23,30 @@
 t_class *clone_class;
 static t_class *clone_in_class, *clone_out_class;
 
+#if PD_DSPTHREADS
+
+typedef struct _signalcontext t_signalcontext;
+
+t_signalcontext *signalcontext_new(void);
+void signalcontext_free(t_signalcontext *x);
+void signalcontext_clear(t_signalcontext *x);
+t_signalcontext *signalcontext_push(t_signalcontext *newcontext);
+void signalcontext_pop(t_signalcontext *oldcontext);
+
+t_dsptaskqueue * dsptaskqueue_push(t_dsptaskqueue *newqueue);
+void dsptaskqueue_pop(t_dsptaskqueue *oldqueue);
+
+#endif /* PD_DSPTHREADS */
+
 typedef struct _copy
 {
     t_glist *c_gl;
-    int c_on;           /* DSP running */
+#if PD_DSPTHREADS
+    t_dsptask *c_task;
+    int c_chainonset;
+    int c_chainlength;
+    t_signalcontext *c_sigcontext;
+#endif
 } t_copy;
 
 typedef struct _in
@@ -42,6 +63,9 @@ typedef struct _out
     t_outlet *o_outlet;
     int o_signal;
     int o_n;
+#if PD_DSPTHREADS
+    t_signal *o_outsig;
+#endif
 } t_out;
 
 typedef struct _clone
@@ -58,8 +82,59 @@ typedef struct _clone
     t_atom *x_argv;
     int x_phase;
     int x_startvoice;   /* number of first voice, 0 by default */
-    int x_suppressvoice; /* suppress voice number as $1 arg */
+    char x_suppressvoice; /* suppress voice number as $1 arg */
+#if PD_DSPTHREADS
+    char x_parallel;     /* process in parallel */
+    char x_threadsafe;   /* are we thread-safe? */
+    t_dsptaskqueue *x_dspqueue; /* DSP task queue */
+#endif
 } t_clone;
+
+#if PD_DSPTHREADS
+
+int obj_markthreadsafe(t_gobj *x, t_symbol *dspsym);
+
+    /* called by obj_markthreadsafe() */
+int clone_markthreadsafe(t_pd *z, t_symbol *dspsym)
+{
+    t_clone *x = (t_clone *)z;
+    int i;
+    x->x_threadsafe = 1;
+    for (i = 0; i < x->x_n; i++)
+    {
+        t_gobj *obj = (t_gobj *)x->x_vec[i].c_gl;
+        if (!obj_markthreadsafe(obj, dspsym))
+            x->x_threadsafe = 0; /* don't break! */
+    }
+    return x->x_threadsafe;
+}
+
+int obj_isthreadsafe(t_gobj *x, t_symbol *dspsym, int *limit);
+
+    /* called by obj_isthreadsafe() */
+int clone_isthreadsafe(t_pd *z, t_symbol *dspsym, int *limit)
+{
+    t_clone *x = (t_clone *)z;
+    if (x->x_threadsafe)
+        return 1;
+    else if (!limit)
+        return 0;
+    else
+    {
+            /* only search for the first offending canvas; the loop is
+             * necessary because of live editing and dynamic patching! */
+        int i;
+        for (i = 0; i < x->x_n; i++)
+        {
+            t_gobj *obj = (t_gobj *)x->x_vec[i].c_gl;
+            if (!obj_isthreadsafe(obj, dspsym, limit))
+                break;
+        }
+        return 0;
+    }
+}
+
+#endif /* PD_DSPTHREADS */
 
 int clone_match(t_pd *z, t_symbol *name, t_symbol *dir)
 {
@@ -146,6 +221,18 @@ static void clone_in_fwd(t_in *x, t_symbol *s, int argc, t_atom *argv)
         typedmess(&x->i_pd, argv->a_w.w_symbol, argc-1, argv+1);
 }
 
+#if PD_DSPTHREADS
+static void clone_in_parallel(t_in *x, t_floatarg f)
+{
+    int par = f != 0;
+    if (par != x->i_owner->x_parallel)
+    {
+        x->i_owner->x_parallel = par;
+        canvas_update_dsp();
+    }
+}
+#endif /* PD_DSPTHREADS */
+
 static void clone_out_anything(t_out *x, t_symbol *s, int argc, t_atom *argv)
 {
     t_atom *outv;
@@ -176,17 +263,29 @@ static void clone_free(t_clone *x)
         }
         for (i = 0; i < x->x_n; i++)
         {
-            canvas_closebang(x->x_vec[i].c_gl);
-            pd_free(&x->x_vec[i].c_gl->gl_pd);
+            t_copy *copy = &x->x_vec[i];
+            canvas_closebang(copy->c_gl);
+            pd_free(&copy->c_gl->gl_pd);
             t_freebytes(x->x_outvec[i],
                 x->x_nout * sizeof(*x->x_outvec[i]));
+        #if PD_DSPTHREADS
+            if (copy->c_sigcontext)
+                signalcontext_free(copy->c_sigcontext);
+            if (copy->c_task)
+                dsptask_free(copy->c_task);
+        #endif
         }
         t_freebytes(x->x_vec, x->x_n * sizeof(*x->x_vec));
         t_freebytes(x->x_argv, x->x_argc * sizeof(*x->x_argv));
         t_freebytes(x->x_invec, x->x_nin * sizeof(*x->x_invec));
         t_freebytes(x->x_outvec, x->x_n * sizeof(*x->x_outvec));
         clone_voicetovis = voicetovis;
+
     }
+#if PD_DSPTHREADS
+    if (x->x_dspqueue)
+        dsptaskqueue_release(x->x_dspqueue);
+#endif
 }
 
 static t_canvas *clone_makeone(t_symbol *s, int argc, t_atom *argv)
@@ -228,6 +327,7 @@ void clone_setn(t_clone *x, t_floatarg f)
     {
         t_canvas *c;
         t_out *outvec;
+        t_copy *copy;
         SETFLOAT(x->x_argv, x->x_startvoice + i);
         if (!(c = clone_makeone(x->x_s, x->x_argc - x->x_suppressvoice,
             x->x_argv + x->x_suppressvoice)))
@@ -237,8 +337,14 @@ void clone_setn(t_clone *x, t_floatarg f)
         }
         x->x_vec = (t_copy *)t_resizebytes(x->x_vec, i * sizeof(t_copy),
             (i+1) * sizeof(t_copy));
-        x->x_vec[i].c_gl = c;
-        x->x_vec[i].c_on = 0;
+        copy = &x->x_vec[i];
+        copy->c_gl = c;
+    #if PD_DSPTHREADS
+        copy->c_task = 0;
+        copy->c_chainonset = 0;
+        copy->c_chainlength = 0;
+        copy->c_sigcontext = 0;
+    #endif
         x->x_outvec = (t_out **)t_resizebytes(x->x_outvec,
             i * sizeof(*x->x_outvec), (i+1) * sizeof(*x->x_outvec));
         x->x_outvec[i] = outvec =
@@ -249,6 +355,9 @@ void clone_setn(t_clone *x, t_floatarg f)
             outvec[j].o_signal =
                 obj_issignaloutlet(&x->x_vec[0].c_gl->gl_obj, i);
             outvec[j].o_n = x->x_startvoice + i;
+        #if PD_DSPTHREADS
+            outvec[j].o_outsig = 0;
+        #endif
             outvec[j].o_outlet =
                 x->x_outvec[0][j].o_outlet;
             obj_connect(&x->x_vec[i].c_gl->gl_obj, j,
@@ -260,8 +369,16 @@ void clone_setn(t_clone *x, t_floatarg f)
     {
         for (i = wantn; i < nwas; i++)
         {
-            canvas_closebang(x->x_vec[i].c_gl);
-            pd_free(&x->x_vec[i].c_gl->gl_pd);
+            t_copy *copy = &x->x_vec[i];
+            canvas_closebang(copy->c_gl);
+            pd_free(&copy->c_gl->gl_pd);
+            t_freebytes(x->x_outvec[i], x->x_nout * sizeof(*x->x_outvec[i]));
+        #if PD_DSPTHREADS
+            if (copy->c_sigcontext)
+                signalcontext_free(copy->c_sigcontext);
+            if (copy->c_task)
+                dsptask_free(copy->c_task);
+        #endif
         }
         x->x_vec = (t_copy *)t_resizebytes(x->x_vec, nwas * sizeof(t_copy),
             wantn * sizeof(*x->x_vec));
@@ -294,10 +411,35 @@ void canvas_dodsp(t_canvas *x, int toplevel, t_signal **sp);
 t_signal *signal_newfromcontext(int borrowed);
 void signal_makereusable(t_signal *sig);
 
+#if PD_DSPTHREADS
+t_int *ugen_getchain(void);
+int ugen_getsize(void);
+t_int *dsp_done(t_int *w);
+
+static t_int *clone_schedtask(t_int *w)
+{
+    t_copy *x = (t_copy *)w[1];
+    dsptask_sched(x->c_task);
+        /* skip the DSP chain performed by clone_runtask(). */
+    return w + 2 + x->c_chainlength;
+}
+
+static void clone_runtask(t_copy *x)
+{
+    t_int *ip = ugen_getchain() + x->c_chainonset;
+    while (ip)
+        ip = (*(t_perfroutine)(*ip))(ip);
+}
+
+#endif /* PD_DSPTHREADS */
+
 static void clone_dsp(t_clone *x, t_signal **sp)
 {
     int i, j, nin, nout;
     t_signal **tempsigs, **tempio;
+#if PD_DSPTHREADS
+    int parallel = x->x_parallel;
+#endif
     if (!x->x_n)
         return;
     for (i = nin = 0; i < x->x_nin; i++)
@@ -319,6 +461,121 @@ static void clone_dsp(t_clone *x, t_signal **sp)
             return;
         }
     }
+#if PD_DSPTHREADS
+        /* always free existing DSP tasks! */
+    for (i = 0; i < x->x_n; i++)
+    {
+        if (x->x_vec[i].c_task)
+        {
+            dsptask_free(x->x_vec[i].c_task);
+            x->x_vec[i].c_task = 0;
+        }
+    }
+    if (parallel)
+    {
+        if (!x->x_dspqueue) /* create lazily */
+            x->x_dspqueue = dsptaskqueue_new(0);
+            /* check thread-safety; unlike block~ in ugen_done_graph(),
+             * we don't use dsptaskqueue_update() and dsptaskqueue_check()
+             * because we already have all the information we need. */
+        if (!x->x_threadsafe)
+        {
+                /* only search for the first offending canvas; the loop is
+                 * necessary because of live editing and dynamic patching! */
+            int i;
+            for (i = 0; i < x->x_n; i++)
+            {
+                if (!canvas_isthreadsafe(x->x_vec[i].c_gl, 1)) /* loud */
+                    break;
+            }
+                /* see also ugen_done_graph() */
+            pd_error(x, "clone: parallel processing not possible because "
+                "some DSP objects are not officially thread-safe! Start Pd with "
+                "with -nothreadsafe to circumvent this check (potentially dangerous!)");
+
+            parallel = 0;
+        }
+    }
+    if (parallel)
+    {
+            /* Every child abstraction gets its own DSP task. Unlike block~ + "parallel",
+             * cloned abstractions are not aware that they are being processed in parallel.
+             * Since all DSP tasks are joined by us, there is no need for double buffering
+             * in voutlet, and consequently there is no delay, either.
+             * The clone object maintains its own DSP task queue. Each cloned instance also has
+             * its own signal context because signals must not be reused across child abstractions.
+             * Each child abstractions starts with new input signals which are copies of our
+             * input signals, but belong to a dedicated signal context. After we have processed
+             * and joined all child abstractions, we can simply sum their output signals into
+             * our output signals. */
+        int blocksize = sp[0]->s_n;
+        t_dsptaskqueue *oldqueue;
+            /* push our queue to the current DSP context */
+        oldqueue = dsptaskqueue_push(x->x_dspqueue);
+            /* reset queue */
+        dsp_add_reset(x->x_dspqueue);
+            /* schedule canvases as tasks. */
+        for (j = 0; j < x->x_n; j++)
+        {
+            t_copy *copy = &x->x_vec[j];
+            t_out *outvec = x->x_outvec[j];
+            t_signal **tempio;
+                /* push new signal context, so that signals are not reused concurrently. */
+            t_signalcontext *oldsigcontext;
+            if (!copy->c_sigcontext)
+                copy->c_sigcontext = signalcontext_new(); /* create lazily */
+            else
+                signalcontext_clear(copy->c_sigcontext);
+            oldsigcontext = signalcontext_push(copy->c_sigcontext);
+            tempio = alloca((nin + nout) * sizeof(t_signal *));
+                /* create input signals (in the new context) */
+            for (i = 0; i < nin; ++i)
+                tempio[i] = signal_newfromcontext(0);
+            for (i = 0; i < nout; ++i)
+                /* create "fake" output signals which will be filled later by voutlet
+                 * in the child abstraction; normally this would be done in ugen_doit(). */
+                outvec[i].o_outsig = tempio[nin + i] = signal_newfromcontext(1);
+                /* create new DSP task */
+            copy->c_task = dsptask_new(x->x_dspqueue, (t_dsptaskfn)clone_runtask, copy);
+            dsp_add(clone_schedtask, 1, copy);
+            copy->c_chainonset = ugen_getsize() - 1;
+                /* copy parent input signals to our input signals. we can already do this
+                 * concurrently because nobody is writing to the parent input signal. */
+            for (i = 0; i < nin; ++i)
+                dsp_add_copy(sp[i]->s_vec, tempio[i]->s_vec, blocksize);
+                /* now we can process the child abstraction. */
+            canvas_dodsp(copy->c_gl, 0, tempio);
+            dsp_add(dsp_done, 0); /* sentinel */
+            copy->c_chainlength = ugen_getsize() - copy->c_chainonset - 1;
+        #if 0 /* not necessary; nobody  will (re)use our signals. */
+            for (i = 0; i < (nin + nout); ++i)
+                signal_makereusable(tempio[i]);
+        #endif
+                /* restore signal context. */
+            signalcontext_pop(oldsigcontext);
+        }
+            /* join all tasks */
+        dsp_add_join(x->x_dspqueue);
+            /* Finally we can sum the outputs. Unlike "regular" clone, we can directly write
+             * to the output signals because the input signals have already been copied. */
+        for (j = 0; j < x->x_n; j++)
+        {
+            for (i = 0; i < nout; i++)
+            {
+                t_sample *from = x->x_outvec[j][i].o_outsig->s_vec;
+                t_sample *to = sp[nin + i]->s_vec;
+                if (j == 0)
+                    dsp_add_copy(from, to, blocksize);
+                else
+                    dsp_add_plus(from, to, to, blocksize);
+            }
+        }
+            /* restore the previous DSP queue */
+        dsptaskqueue_pop(oldqueue);
+
+        return; /* done */
+    }
+#endif /* PD_DSPTHREADS */
     tempsigs = (t_signal **)alloca((nin + 2 * nout) * sizeof(*tempsigs));
     tempio = tempsigs + nout;
         /* load input signals into signal vector to send subpatches */
@@ -329,15 +586,19 @@ static void clone_dsp(t_clone *x, t_signal **sp)
         sp[i]->s_refcount += x->x_n-1;
         tempio[i] = sp[i];
     }
-        /* for first copy, write output to first nout temp sigs */
+        /* create temp signals to safely sum the outputs of each canvas
+         * without overwriting the input. */
     for (i = 0; i < nout; i++)
         tempsigs[i] = signal_newfromcontext(0);
 
     for (j = 0; j < x->x_n; j++)
     {
+            /* create "fake" output signals which will be filled later by voutlet
+             * in the child abstraction; normally this would be done in ugen_doit(). */
         for (i = 0; i < nout; i++)
             tempio[nin + i] = signal_newfromcontext(1);
         canvas_dodsp(x->x_vec[j].c_gl, 0, tempio);
+            /* sum output signals to temp signals */
         for (i = 0; i < nout; i++)
         {
             if (j == 0)
@@ -348,7 +609,7 @@ static void clone_dsp(t_clone *x, t_signal **sp)
             signal_makereusable(tempio[nin + i]);
         }
     }
-        /* copy to output signsls */
+        /* copy temp signals to our output signals */
     for (i = 0; i < nout; i++)
     {
         dsp_add_copy(tempsigs[i]->s_vec, sp[nin+i]->s_vec, tempsigs[i]->s_n);
@@ -366,6 +627,11 @@ static void *clone_new(t_symbol *s, int argc, t_atom *argv)
     x->x_outvec = 0;
     x->x_startvoice = 0;
     x->x_suppressvoice = 0;
+#if PD_DSPTHREADS
+    x->x_parallel = 0;
+    x->x_threadsafe = !sys_threadsafe; /* see canvas_new() */
+    x->x_dspqueue = 0;
+#endif
     clone_voicetovis = -1;
     if (argc == 0)
     {
@@ -405,6 +671,12 @@ static void *clone_new(t_symbol *s, int argc, t_atom *argv)
             goto fail;
     x->x_vec = (t_copy *)getbytes(sizeof(*x->x_vec));
     x->x_vec[0].c_gl = c;
+#if PD_DSPTHREADS
+    x->x_vec[0].c_task = 0;
+    x->x_vec[0].c_chainonset = 0;
+    x->x_vec[0].c_chainlength = 0;
+    x->x_vec[0].c_sigcontext = 0;
+#endif
     x->x_n = 1;
     x->x_nin = obj_ninlets(&x->x_vec[0].c_gl->gl_obj);
     x->x_invec = (t_in *)getbytes(x->x_nin * sizeof(*x->x_invec));
@@ -430,6 +702,9 @@ static void *clone_new(t_symbol *s, int argc, t_atom *argv)
         outvec[i].o_signal =
             obj_issignaloutlet(&x->x_vec[0].c_gl->gl_obj, i);
         outvec[i].o_n = x->x_startvoice;
+    #if PD_DSPTHREADS
+        outvec[i].o_outsig = 0;
+    #endif
         outvec[i].o_outlet =
             outlet_new(&x->x_obj, (outvec[i].o_signal ? &s_signal : 0));
         obj_connect(&x->x_vec[0].c_gl->gl_obj, i,
@@ -452,7 +727,7 @@ fail:
 void clone_setup(void)
 {
     clone_class = class_new(gensym("clone"), (t_newmethod)clone_new,
-        (t_method)clone_free, sizeof(t_clone), CLASS_NOINLET, A_GIMME, 0);
+        (t_method)clone_free, sizeof(t_clone), CLASS_THREADSAFE | CLASS_NOINLET, A_GIMME, 0);
     class_addmethod(clone_class, (t_method)clone_click, gensym("click"),
         A_FLOAT, A_FLOAT, A_FLOAT, A_FLOAT, A_FLOAT, 0);
     class_addmethod(clone_class, (t_method)clone_loadbang, gensym("loadbang"),
@@ -474,6 +749,10 @@ void clone_setup(void)
         A_FLOAT, A_FLOAT, 0);
     class_addmethod(clone_in_class, (t_method)clone_in_fwd, gensym("fwd"),
         A_GIMME, 0);
+#if PD_DSPTHREADS
+    class_addmethod(clone_in_class, (t_method)clone_in_parallel, gensym("parallel"),
+        A_FLOAT, 0);
+#endif
     class_addlist(clone_in_class, (t_method)clone_in_list);
 
     clone_out_class = class_new(gensym("clone-outlet"), 0, 0,

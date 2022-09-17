@@ -111,6 +111,18 @@ typedef unsigned __int64  uint64_t;
 # error invalid FLOATSIZE: must be 32 or 64
 #endif
 
+/* externals may override this for parallel processing support.
+ * You have to use the CLASS_DEFAULT macro in class_new() and
+ * in your perform routine(s) you must only call API functions
+ * that are markes as THREADSAFE! */
+#ifndef PD_PARALLEL
+#define PD_PARALLEL 0
+#endif
+
+/* used to mark API functions as thread-safe, meaning that they
+ * can be safely used in a perform routine. */
+#define THREADSAFE
+
 typedef PD_LONGINTTYPE t_int;       /* pointer-size integer */
 typedef PD_FLOATTYPE t_float;       /* a float type at most the same size */
 typedef PD_FLOATTYPE t_floatarg;    /* float type for function calls */
@@ -373,16 +385,15 @@ EXTERN t_symbol *binbuf_realizedollsym(t_symbol *s, int ac, const t_atom *av,
 /* ------------------  clocks --------------- */
 
 EXTERN t_clock *clock_new(void *owner, t_method fn);
-EXTERN void clock_set(t_clock *x, double systime);
-EXTERN void clock_delay(t_clock *x, double delaytime);
-EXTERN void clock_unset(t_clock *x);
-EXTERN void clock_setunit(t_clock *x, double timeunit, int sampflag);
-EXTERN double clock_getlogicaltime(void);
-EXTERN double clock_getsystime(void); /* OBSOLETE; use clock_getlogicaltime() */
-EXTERN double clock_gettimesince(double prevsystime);
-EXTERN double clock_gettimesincewithunits(double prevsystime,
-    double units, int sampflag);
-EXTERN double clock_getsystimeafter(double delaytime);
+THREADSAFE EXTERN void clock_set(t_clock *x, double systime);
+THREADSAFE EXTERN void clock_delay(t_clock *x, double delaytime);
+THREADSAFE EXTERN void clock_unset(t_clock *x);
+THREADSAFE EXTERN void clock_setunit(t_clock *x, double timeunit, int sampflag);
+THREADSAFE EXTERN double clock_getlogicaltime(void);
+THREADSAFE EXTERN double clock_getsystime(void); /* OBSOLETE; use clock_getlogicaltime() */
+THREADSAFE EXTERN double clock_gettimesince(double prevsystime);
+THREADSAFE EXTERN double clock_gettimesincewithunits(double prevsystime, double units, int sampflag);
+THREADSAFE EXTERN double clock_getsystimeafter(double delaytime);
 EXTERN void clock_free(t_clock *x);
 
 /* ----------------- pure data ---------------- */
@@ -461,13 +472,20 @@ EXTERN const t_parentwidgetbehavior *pd_getparentwidget(t_pd *x);
 
 /* -------------------- classes -------------- */
 
-#define CLASS_DEFAULT 0         /* flags for new classes below */
+/* flags for new classes below */
 #define CLASS_PD 1
 #define CLASS_GOBJ 2
 #define CLASS_PATCHABLE 3
+#define CLASS_THREADSAFE 4
 #define CLASS_NOINLET 8
 
 #define CLASS_TYPEMASK 3
+
+#if PD_PARALLEL
+# define CLASS_DEFAULT CLASS_THREADSAFE
+#else
+# define CLASS_DEFAULT 0
+#endif
 
 EXTERN t_class *class_new(t_symbol *name, t_newmethod newmethod,
     t_method freemethod, size_t size, int flags, t_atomtype arg1, ...);
@@ -533,15 +551,15 @@ EXTERN void class_setfreefn(t_class *c, t_classfreefn fn);
 
 /* ------------   printing --------------------------------- */
 
-EXTERN void post(const char *fmt, ...);
-EXTERN void startpost(const char *fmt, ...);
-EXTERN void poststring(const char *s);
-EXTERN void postfloat(t_floatarg f);
-EXTERN void postatom(int argc, const t_atom *argv);
-EXTERN void endpost(void);
+THREADSAFE EXTERN void post(const char *fmt, ...);
+THREADSAFE EXTERN void startpost(const char *fmt, ...);
+THREADSAFE EXTERN void poststring(const char *s);
+THREADSAFE EXTERN void postfloat(t_floatarg f);
+THREADSAFE EXTERN void postatom(int argc, const t_atom *argv);
+THREADSAFE EXTERN void endpost(void);
 
-EXTERN void bug(const char *fmt, ...) ATTRIBUTE_FORMAT_PRINTF(1, 2);
-EXTERN void pd_error(const void *object, const char *fmt, ...) ATTRIBUTE_FORMAT_PRINTF(2, 3);
+THREADSAFE EXTERN void bug(const char *fmt, ...) ATTRIBUTE_FORMAT_PRINTF(1, 2);
+THREADSAFE EXTERN void pd_error(const void *object, const char *fmt, ...) ATTRIBUTE_FORMAT_PRINTF(2, 3);
 
 /* for logpost(); does *not* work with verbose()! */
 typedef enum {
@@ -552,11 +570,11 @@ typedef enum {
     PD_VERBOSE
 } t_loglevel;
 
-EXTERN void logpost(const void *object, int level, const char *fmt, ...)
+THREADSAFE EXTERN void logpost(const void *object, int level, const char *fmt, ...)
     ATTRIBUTE_FORMAT_PRINTF(3, 4);
 
 /* deprecated, use logpost() instead. */
-EXTERN void verbose(int level, const char *fmt, ...) ATTRIBUTE_FORMAT_PRINTF(2, 3);
+THREADSAFE EXTERN void verbose(int level, const char *fmt, ...) ATTRIBUTE_FORMAT_PRINTF(2, 3);
 
 
 /* ------------  system interface routines ------------------- */
@@ -625,14 +643,14 @@ EXTERN int sys_get_outchannels(void);
 
 EXTERN void dsp_add(t_perfroutine f, int n, ...);
 EXTERN void dsp_addv(t_perfroutine f, int n, t_int *vec);
-EXTERN void pd_fft(t_float *buf, int npoints, int inverse);
-EXTERN int ilog2(int n);
+THREADSAFE EXTERN void pd_fft(t_float *buf, int npoints, int inverse);
+THREADSAFE EXTERN int ilog2(int n);
 
-EXTERN void mayer_fht(t_sample *fz, int n);
-EXTERN void mayer_fft(int n, t_sample *real, t_sample *imag);
-EXTERN void mayer_ifft(int n, t_sample *real, t_sample *imag);
-EXTERN void mayer_realfft(int n, t_sample *real);
-EXTERN void mayer_realifft(int n, t_sample *real);
+THREADSAFE EXTERN void mayer_fht(t_sample *fz, int n);
+THREADSAFE EXTERN void mayer_fft(int n, t_sample *real, t_sample *imag);
+THREADSAFE EXTERN void mayer_ifft(int n, t_sample *real, t_sample *imag);
+THREADSAFE EXTERN void mayer_realfft(int n, t_sample *real);
+THREADSAFE EXTERN void mayer_realifft(int n, t_sample *real);
 
 EXTERN float *cos_table;
 #define LOGCOSTABSIZE 9
@@ -669,18 +687,18 @@ EXTERN void resamplefrom_dsp(t_resample *x, t_sample *in, int insize, int outsiz
 EXTERN void resampleto_dsp(t_resample *x, t_sample *out, int insize, int outsize, int method);
 
 /* ----------------------- utility functions for signals -------------- */
-EXTERN t_float mtof(t_float);
-EXTERN t_float ftom(t_float);
-EXTERN t_float rmstodb(t_float);
-EXTERN t_float powtodb(t_float);
-EXTERN t_float dbtorms(t_float);
-EXTERN t_float dbtopow(t_float);
+THREADSAFE EXTERN t_float mtof(t_float);
+THREADSAFE EXTERN t_float ftom(t_float);
+THREADSAFE EXTERN t_float rmstodb(t_float);
+THREADSAFE EXTERN t_float powtodb(t_float);
+THREADSAFE EXTERN t_float dbtorms(t_float);
+THREADSAFE EXTERN t_float dbtopow(t_float);
 
-EXTERN t_float q8_sqrt(t_float);
-EXTERN t_float q8_rsqrt(t_float);
+THREADSAFE EXTERN t_float q8_sqrt(t_float);
+THREADSAFE EXTERN t_float q8_rsqrt(t_float);
 #ifndef N32
-EXTERN t_float qsqrt(t_float);  /* old names kept for extern compatibility */
-EXTERN t_float qrsqrt(t_float);
+THREADSAFE EXTERN t_float qsqrt(t_float);  /* old names kept for extern compatibility */
+THREADSAFE EXTERN t_float qrsqrt(t_float);
 #endif
 
 /* --------------------- data --------------------------------- */
@@ -697,11 +715,56 @@ EXTERN int garray_npoints(t_garray *x);
 EXTERN char *garray_vec(t_garray *x);
 EXTERN void garray_resize(t_garray *x, t_floatarg f);  /* avoid; use this: */
 EXTERN void garray_resize_long(t_garray *x, long n);   /* better version */
-EXTERN void garray_usedindsp(t_garray *x);
+EXTERN void garray_usedindsp(t_garray *x); /* avoid, use garrayref methods instead */
 EXTERN void garray_setsaveit(t_garray *x, int saveit);
 EXTERN t_glist *garray_getglist(t_garray *x);
 EXTERN t_array *garray_getarray(t_garray *x);
 EXTERN t_class *scalar_class;
+
+/* t_garrayref is a safe reference to a garray (similar to gpointer).
+ * The actual array data can be obtained on demand by the functions below.
+ * (You must not store any pointers to array data because it might become stale!)
+ * The advantage of using those functions instead of garray_getfloatwords()
+ * is that you don't have to call garray_usedindsp(), which means the array data
+ * can change without rebuilding the DSP graph!
+ * They also speed up and simplify garray access in control objects because you
+ * do not have to look up the garray every single time.
+ * Finally, they allow to synchronize array data access in parallel DSP processing.
+ * See d_array.c for examples. */
+typedef struct _arrayref
+{
+    t_garray *ar_garray;
+    t_gstub *ar_stub;
+} t_garrayref;
+
+EXTERN void garrayref_init(t_garrayref *x);
+EXTERN void garrayref_unset(t_garrayref *x);
+/* set garrayref to a new garray */
+EXTERN int garrayref_set(t_garrayref *x, t_symbol *arrayname, t_object *obj);
+/* check if the garrayref is valid. Call before accessing the 'ar_garray' member! */
+EXTERN int garrayref_check(t_garrayref *x);
+/* for control objects: safely access array data. If the reference is empty or
+ * stale, (re)acquire the array by name; if 'arrayname' is NULL, fail silently.
+ * Returns 1 if it could get the array data; otherwise returns 0.
+ * If you want to set the garrayref to another garray, you must either call
+ * garray_set() with the new name, or call garray_unset() and acquire it lazily
+ * with the next call to garrayref_get(). */
+EXTERN int garrayref_get(t_garrayref *x, int *size, t_word **vec, t_symbol *arrayname, t_object *object);
+/* for DSP objects: lock/unlock garray for reading/writing in the perform routine.
+ * Returns 1 if it could get the array data and lock the garray; otherwise returns 0.
+ * WARNING: do not attempt to unlock the garray if you could not lock it! */
+#if PD_PARALLEL
+THREADSAFE EXTERN int garrayref_write_lock(t_garrayref *x, int *size, t_word **vec);
+THREADSAFE EXTERN void garrayref_write_unlock(t_garrayref *x);
+THREADSAFE EXTERN int garrayref_read_lock(t_garrayref *x, int *size, t_word **vec);
+THREADSAFE EXTERN void garrayref_read_unlock(t_garrayref *x);
+#else
+/* optimization for non-parallel builds */
+#define garrayref_write_lock(x, size, vec) garrayref_get(x, size, vec, 0, 0)
+#define garrayref_write_unlock(x)
+#define garrayref_read_lock(x, size, vec) garrayref_get(x, size, vec, 0, 0)
+#define garrayref_read_unlock(x)
+#endif /* PD_PARALLEL */
 
 EXTERN t_float *value_get(t_symbol *s);
 EXTERN void value_release(t_symbol *s);
@@ -924,12 +987,16 @@ EXTERN void pd_setinstance(t_pdinstance *x);
 EXTERN void pdinstance_free(t_pdinstance *x);
 #endif /* PDINSTANCE */
 
-#if defined(PDTHREADS) && defined(PDINSTANCE)
 #ifdef _MSC_VER
-#define PERTHREAD __declspec(thread)
+#define THREADLOCAL __declspec(thread)
+#elif defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 201112L)
+#define THREADLOCAL _Thread_local
 #else
-#define PERTHREAD __thread
+#define THREADLOCAL __thread
 #endif /* _MSC_VER */
+
+#if PDTHREADS && defined(PDINSTANCE)
+#define PERTHREAD THREADLOCAL
 #else
 #define PERTHREAD
 #endif

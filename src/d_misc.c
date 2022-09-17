@@ -65,7 +65,7 @@ static void *print_new(t_symbol *s)
 static void print_setup(void)
 {
     print_class = class_new(gensym("print~"), (t_newmethod)print_new, 0,
-        sizeof(t_print), 0, A_DEFSYM, 0);
+        sizeof(t_print), CLASS_DEFAULT, A_DEFSYM, 0);
     CLASS_MAINSIGNALIN(print_class, t_print, x_f);
     class_addmethod(print_class, (t_method)print_dsp, gensym("dsp"), A_CANT, 0);
     class_addbang(print_class, print_bang);
@@ -115,7 +115,7 @@ static void *bang_tilde_new(t_symbol *s)
 static void bang_tilde_setup(void)
 {
     bang_tilde_class = class_new(gensym("bang~"), (t_newmethod)bang_tilde_new,
-        (t_method)bang_tilde_free, sizeof(t_bang), 0, 0);
+        (t_method)bang_tilde_free, sizeof(t_bang), CLASS_DEFAULT, 0);
     class_addmethod(bang_tilde_class, (t_method)bang_tilde_dsp,
         gensym("dsp"), 0);
 }

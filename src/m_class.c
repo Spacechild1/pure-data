@@ -60,13 +60,20 @@ void s_stuff_newpdinstance(void)
     STUFF->st_externlist = STUFF->st_searchpath =
         STUFF->st_staticpath = STUFF->st_helppath = STUFF->st_temppath = 0;
     STUFF->st_schedblocksize = STUFF->st_blocksize = DEFDACBLKSIZE;
+    STUFF->st_inchannels = STUFF->st_outchannels = 0;
     STUFF->st_dacsr = DEFDACSAMPLERATE;
+    STUFF->st_soundin = NULL;
+    STUFF->st_soundout = NULL;
     STUFF->st_printhook = sys_printhook;
     STUFF->st_impdata = NULL;
+    STUFF->st_soundout_locks = NULL;
 }
+
+void sys_audio_free(void);
 
 void s_stuff_freepdinstance(void)
 {
+    sys_audio_free();
     freebytes(STUFF, sizeof(*STUFF));
 }
 
@@ -492,6 +499,7 @@ t_class *class_new(t_symbol *s, t_newmethod newmethod, t_method freemethod,
     c->c_pwb = 0;
     c->c_firstin = ((flags & CLASS_NOINLET) == 0);
     c->c_patchable = (typeflag == CLASS_PATCHABLE);
+    c->c_threadsafe = (flags & CLASS_THREADSAFE) != 0;
     c->c_gobj = (typeflag >= CLASS_GOBJ);
     c->c_drawcommand = 0;
     c->c_floatsignalin = 0;
@@ -610,6 +618,19 @@ void class_addmethod(t_class *c, t_method fn, t_symbol *sel,
             post("warning: signal method overrides class_mainsignalin");
         c->c_floatsignalin = -1;
     }
+#if PD_DSPTHREADS
+        /* post non-thread-safe DSP objects */
+    if (sys_verbose && sys_threadsafe && (sel == gensym("dsp"))
+        && !c->c_threadsafe)
+    {
+        char *slash = strrchr(c->c_externdir->s_name, '/');
+        if (slash) /* external */
+            logpost(0, PD_VERBOSE, "%s/%s not thread-safe",
+                slash+1, c->c_name->s_name);
+        else /* built-in objects should be thread-safe; did we forget one? */
+            pd_error(0, "%s not thread-safe", c->c_name);
+    }
+#endif
         /* check for special cases.  "Pointer" is missing here so that
         pd_objectmaker's pointer method can be typechecked differently.  */
     if (sel == &s_bang)

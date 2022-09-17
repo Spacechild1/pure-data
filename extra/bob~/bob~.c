@@ -244,7 +244,7 @@ void bob_tilde_setup(void)
 {
     int i;
     bob_class = class_new(gensym("bob~"),
-        (t_newmethod)bob_new, 0, sizeof(t_bob), 0, 0);
+        (t_newmethod)bob_new, 0, sizeof(t_bob), CLASS_DEFAULT, 0);
     class_addmethod(bob_class, (t_method)bob_saturation, gensym("saturation"),
         A_FLOAT, 0);
     class_addmethod(bob_class, (t_method)bob_oversample, gensym("oversample"),

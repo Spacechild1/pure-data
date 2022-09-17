@@ -73,6 +73,7 @@ typedef struct _audiosettings
     int a_advance;
     int a_callback;
     int a_blocksize;
+    int a_numthreads;
 } t_audiosettings;
 
 #define SENDDACS_NO 0           /* return values for sys_send_dacs() */
@@ -392,6 +393,46 @@ EXTERN void inmidi_polyaftertouch(int portno,
 /* } jsarlo */
 EXTERN int sys_zoom_open;
 
+/* DSP task queue */
+#if PD_DSPTHREADS
+
+EXTERN_STRUCT _dsptaskqueue;
+#define t_dsptaskqueue struct _dsptaskqueue
+
+t_dsptaskqueue * dsptaskqueue_new(t_canvas *owner);
+void dsptaskqueue_release(t_dsptaskqueue *x);
+void dsptaskqueue_update(t_dsptaskqueue *x);
+int dsptaskqueue_check(t_dsptaskqueue *x);
+void dsptaskqueue_reset(t_dsptaskqueue *x);
+void dsptaskqueue_join(t_dsptaskqueue *x);
+void dsp_add_reset(t_dsptaskqueue *x);
+void dsp_add_join(t_dsptaskqueue *x);
+
+int canvas_markthreadsafe(void);
+int canvas_isthreadsafe(t_canvas *x, int loud);
+
+EXTERN_STRUCT _dsptask;
+#define t_dsptask struct _dsptask
+
+typedef void (*t_dsptaskfn) (void *data);
+
+t_dsptask * dsptask_new(t_dsptaskqueue *queue, t_dsptaskfn fn, void *data);
+void dsptask_free(t_dsptask *x);
+void dsptask_sched(t_dsptask *x);
+void dsptask_switch(t_dsptask *x, int on);
+
+#endif /* PD_DSPTHREADS */
+
+/* DSP thread pool API, for documentation see d_threadpool.c */
+EXTERN int sys_havedspthreadpool(void);
+EXTERN int sys_dspthreadpool_start(int *numthreads, int external);
+EXTERN int sys_dspthreadpool_stop(int external);
+EXTERN int sys_dspthread_run(int index);
+
+EXTERN int sys_threadsafe; /* enable/disable thread-safety checks */
+EXTERN int sys_threadaffinity; /* enable/disable thread pinning */
+EXTERN int sys_threadspinwait; /* spin while waiting for tasks */
+
 struct _instancestuff
 {
     t_namelist *st_externlist;
@@ -409,6 +450,7 @@ struct _instancestuff
     double st_time_per_dsp_tick;    /* obsolete - included for GEM?? */
     t_printhook st_printhook;   /* set this to override per-instance printing */
     void *st_impdata; /* optional implementation-specific data for libpd, etc */
+    struct _spinlock *st_soundout_locks; /* spinlocks for dac~ */
 };
 
 #define STUFF (pd_this->pd_stuff)

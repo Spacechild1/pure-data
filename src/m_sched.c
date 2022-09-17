@@ -10,6 +10,9 @@
 #ifdef _WIN32
 #include <windows.h>
 #endif
+#if PD_DSPTHREADS
+#include "s_sync.h"
+#endif
 
     /* LATER consider making this variable.  It's now the LCM of all sample
     rates we expect to see: 32000, 44100, 48000, 88200, 96000. */
@@ -30,12 +33,27 @@ int sys_sleepgrain;
 
 typedef void (*t_clockmethod)(void *client);
 
+#if PD_DSPTHREADS
+/* do not use PERTHREAD! */
+static THREADLOCAL int dspthreadindex = 0;
+
+void dspthread_setindex(int index)
+{
+    dspthreadindex = index;
+}
+
+#endif /* PD_DSPTHREADS */
+
 struct _clock
 {
+#if PD_DSPTHREADS
+    t_lfs_node c_node;
+    double c_wanttime;
+#endif
     double c_settime;       /* in TIMEUNITS; <0 if unset */
     void *c_owner;
     t_clockmethod c_fn;
-    struct _clock *c_next;
+    struct _clock *c_next;  /* for the clock list */
     t_float c_unit;         /* >0 if in TIMEUNITS; <0 if in samples */
 };
 
@@ -46,6 +64,10 @@ struct _clock
 t_clock *clock_new(void *owner, t_method fn)
 {
     t_clock *x = (t_clock *)getbytes(sizeof *x);
+#if PD_DSPTHREADS
+    lfs_node_init(x);
+    x->c_wanttime = -1;
+#endif
     x->c_settime = -1;
     x->c_owner = owner;
     x->c_fn = (t_clockmethod)fn;
@@ -54,8 +76,42 @@ t_clock *clock_new(void *owner, t_method fn)
     return (x);
 }
 
+#if PD_DSPTHREADS
+void clock_defer(t_clock *x);
+
+/* dispatch clocks scheduled from DSP helper threads */
+void clock_dispatch(t_clock *x)
+{
+#if 1
+    if (dspthreadindex != 0)
+    {
+        sys_lock();
+        bug("clock_dispatch");
+        sys_unlock();
+        return;
+    }
+#endif
+    for (; x; x = lfs_node_next(x))
+    {
+        if (x->c_wanttime >= 0)
+            clock_set(x, x->c_wanttime);
+        else
+            clock_unset(x);
+    }
+}
+#endif /* PD_DSPTHREADS */
+
 void clock_unset(t_clock *x)
 {
+#if PD_DSPTHREADS
+    if (dspthreadindex > 0)
+    {
+        /* called from DSP helper thread -> defer */
+        x->c_wanttime = -1;
+        clock_defer(x);
+        return;
+    }
+#endif
     if (x->c_settime >= 0)
     {
         if (x == pd_this->pd_clock_setlist)
@@ -74,6 +130,15 @@ void clock_unset(t_clock *x)
 void clock_set(t_clock *x, double setticks)
 {
     if (setticks < pd_this->pd_systime) setticks = pd_this->pd_systime;
+#if PD_DSPTHREADS
+    if (dspthreadindex > 0)
+    {
+        /* called from DSP helper thread -> defer */
+        x->c_wanttime = setticks;
+        clock_defer(x);
+        return;
+    }
+#endif
     clock_unset(x);
     x->c_settime = setticks;
     if (pd_this->pd_clock_setlist &&
@@ -241,6 +306,9 @@ void sched_tick(void)
 {
     double next_sys_time = pd_this->pd_systime + SYSTIMEPERTICK;
     int countdown = 5000;
+#if PD_DSPTHREADS
+    dspthreadindex = 0; /* just to be sure */
+#endif
     while (pd_this->pd_clock_setlist &&
         pd_this->pd_clock_setlist->c_settime < next_sys_time)
     {
@@ -445,8 +513,12 @@ int m_mainloop(void)
 
 int m_batchmain(void)
 {
+    t_audiosettings as;
+    sys_get_audio_settings(&as);
+    sys_dspthreadpool_start(&as.a_numthreads, 0);
     while (sys_quit != SYS_QUIT_QUIT)
         sched_tick();
+    sys_dspthreadpool_stop(0);
     return (0);
 }
 

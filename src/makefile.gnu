@@ -34,6 +34,7 @@ PDEXEC = $(BIN_DIR)/pd
 EXT= pd_linux
 ALSA=true
 OSS=true
+PARALLEL=true
 
 prefix = /usr/local
 exec_prefix = ${prefix}
@@ -59,6 +60,10 @@ CPPFLAGS = -DPD -DHAVE_LIBDL -DHAVE_UNISTD_H -DHAVE_ALLOCA_H \
     -Wall -W -Wstrict-prototypes  -Wno-address\
     -Wno-unused -Wno-unused-parameter -Wno-parentheses -Wno-switch \
     -Wno-cast-function-type -Wno-stringop-truncation -Wno-format-truncation
+
+ifeq ($(PARALLEL), true)
+CPPFLAGS += -DPD_DSPTHREADS=1 -DPD_PARALLEL=1
+endif
 
 # code generation flags (e.g., optimization).  
 CODECFLAGS = -g -O3 -ffast-math -funroll-loops -fomit-frame-pointer
@@ -116,11 +121,11 @@ SRC = g_canvas.c g_graph.c g_text.c g_rtext.c g_array.c g_template.c g_io.c \
     m_pd.c m_class.c m_obj.c m_atom.c m_memory.c m_binbuf.c \
     m_conf.c m_glob.c m_sched.c \
     s_main.c s_inter.c s_inter_gui.c s_print.c s_loader.c s_path.c s_entry.c \
-    s_audio.c s_audio_paring.c s_midi.c s_net.c s_utf8.c \
+    s_audio.c s_audio_paring.c s_midi.c s_net.c s_sync.c s_utf8.c \
     d_ugen.c d_ctl.c d_arithmetic.c d_osc.c d_filter.c d_dac.c d_misc.c \
     d_math.c d_fft.c d_fft_fftsg.c d_array.c d_global.c \
     d_delay.c d_resample.c d_soundfile.c d_soundfile_aiff.c d_soundfile_caf.c \
-    d_soundfile_next.c d_soundfile_wave.c \
+    d_soundfile_next.c d_soundfile_wave.c d_threadpool.c \
     x_arithmetic.c x_connective.c x_interface.c x_midi.c x_misc.c \
     x_time.c x_acoustics.c x_net.c x_text.c x_gui.c x_list.c x_array.c \
     x_file.c x_scalar.c  x_vexp.c x_vexp_if.c x_vexp_fun.c \

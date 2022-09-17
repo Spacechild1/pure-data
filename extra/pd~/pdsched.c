@@ -115,6 +115,7 @@ int pd_extern_sched(char *flags)
     /* fprintf(stderr, "Pd plug-in scheduler called, chans %d %d, sr %d\n",
         chin, chout, (int)rate); */
     sys_setchsr(chin, chout, as.a_srate);
+    sys_dspthreadpool_start(&as.a_numthreads, 0);
     while (useascii ? readasciimessage(b) : readbinmessage(b) )
     {
         t_atom *ap = binbuf_getvec(b);
@@ -163,5 +164,6 @@ int pd_extern_sched(char *flags)
         }
     }
     binbuf_free(b);
+    sys_dspthreadpool_stop(0);
     return (0);
 }
