@@ -34,6 +34,7 @@ PDEXEC = $(BIN_DIR)/pd
 EXT= pd_linux
 ALSA=true
 OSS=true
+PARALLEL=true
 
 prefix = /usr/local
 exec_prefix = ${prefix}
@@ -59,6 +60,10 @@ CPPFLAGS = -DPD -DHAVE_LIBDL -DHAVE_UNISTD_H -DHAVE_ALLOCA_H \
     -Wall -W -Wstrict-prototypes  -Wno-address\
     -Wno-unused -Wno-unused-parameter -Wno-parentheses -Wno-switch \
     -Wno-cast-function-type -Wno-stringop-truncation -Wno-format-truncation
+
+ifeq ($(PARALLEL), true)
+CPPFLAGS += -DPD_DSPTHREADS=1 -DPD_PARALLEL=1
+endif
 
 # code generation flags (e.g., optimization).  
 CODECFLAGS = -g -O3 -ffast-math -funroll-loops -fomit-frame-pointer

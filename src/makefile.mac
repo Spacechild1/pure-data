@@ -11,6 +11,7 @@ EXT= pd_darwin
 GUINAME= libPdTcl.dylib
 ARCH= -arch i386 -arch ppc
 EXTRAARCH= -arch i386 -arch x86_64 -arch ppc
+PARALLEL=true
 
 MKDIR_P = mkdir -p
 
@@ -37,6 +38,7 @@ CPPFLAGS = -DPD -DINSTALL_PREFIX=\"$(prefix)\" \
     -I$(PADIR)/src/os/mac_osx/ -I$(PMDIR)/pm_common \
     -I$(PMDIR)/pm_mac -I$(PMDIR)/porttime \
     -DUSEAPI_PORTAUDIO -DPA_USE_COREAUDIO -DNEWBUFFER
+
 ARCH_CFLAGS = $(ARCH) 
 WARN_CFLAGS = -Wall -W -Wstrict-prototypes -Wno-unused -Wno-unused-parameter \
      -Wno-parentheses -Wno-switch
@@ -45,6 +47,12 @@ MORECFLAGS = -Wno-error -ffast-math -O3
 LDFLAGS = -Wl -framework CoreAudio -framework AudioUnit \
     -framework AudioToolbox -framework Carbon -framework CoreMIDI \
     -framework CoreFoundation $(ARCH) \
+
+ifeq ($(PARALLEL), true)
+CPPFLAGS += -DPD_DSPTHREADS=1 -DPD_PARALLEL=1
+MORECFLAGS += -mmacosx-version-min=10.9
+LDFLAGS += -mmacosx-version-min=10.9
+endif
 
 LIB = -ldl -lm -lpthread
 

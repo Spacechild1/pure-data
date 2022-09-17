@@ -39,6 +39,7 @@ PDDLL = $(EXECDIR)/pd.dll
 PDCOM = $(EXECDIR)/pd.com
 PDRECEIVE = $(EXECDIR)/pdreceive.exe
 PDSEND = $(EXECDIR)/pdsend.exe
+PARALLEL=true
 
 DLLWRAP= dllwrap
 
@@ -69,6 +70,10 @@ WARN_CFLAGS = -Wall -W -Wstrict-prototypes -Wno-unused \
 # next minor version of Windows, 5.2.
 ARCH_CFLAGS = -DPD -DPD_INTERNAL -DPA_USE_ASIO -DPA_USE_WMME -DWINVER=0x0502 \
      -DUSEAPI_MMIO -DUSEAPI_PORTAUDIO -mms-bitfields -DWISH='"wish85.exe"'
+
+ifeq ($(PARALLEL), true)
+ARCH_CFLAGS += -DPD_DSPTHREADS=1 -DPD_PARALLEL=1
+endif
 
 CFLAGS += $(ARCH_CFLAGS) $(WARN_CFLAGS) $(OPT_CFLAGS) $(MORECFLAGS)
 
