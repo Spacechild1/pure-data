@@ -1759,12 +1759,15 @@ typedef struct _readsf
     int x_bufsize;                    /**< buffer size in bytes */
     int x_nchannels;                  /**< number of channels */
     int x_ninlets;                    /**< number of inlets (for writesf~) */
-    int x_multi;                      /**< multichannel mode (for readsf~) */
+    char x_multi;                     /**< multichannel mode (for readsf~) */
+    char x_offline;                   /**< offline processing */
+    char x_offlinestream;             /**< offline streaming */
+    char x_threadrunning;             /**< child thread is running */
     t_sample *x_vec[MAXSFCHANS];      /**< audio vectors */
     int x_vecsize;                    /**< vector size for transfers */
-    t_outlet *x_bangout;              /**< bang-on-done outlet */
     t_soundfile_state x_state;        /**< opened, running, or idle */
     t_float x_insamplerate;           /**< input signal sample rate, if known */
+    t_outlet *x_bangout;              /**< bang-on-done outlet */
         /* parameters to communicate with subthread */
     t_soundfile_request x_requestcode; /**< pending request to I/O thread */
     const char *x_filename;   /**< file to open (permanently allocated) */
@@ -2102,6 +2105,7 @@ static void *readsf_child_main(void *zz)
 /* ----- the object proper runs in the calling (parent) thread ----- */
 
 static void readsf_tick(t_readsf *x);
+static void readsf_start_thread(t_readsf *x);
 
 static void *readsf_new(t_symbol *s, int argc, t_atom *argv)
 {
@@ -2144,9 +2148,13 @@ static void *readsf_new(t_symbol *s, int argc, t_atom *argv)
     pthread_cond_init(&x->x_answercondition, 0);
     x->x_vecsize = MAXVECSIZE;
     x->x_state = STATE_IDLE;
+    x->x_requestcode = REQUEST_NOTHING;
     x->x_clock = clock_new(x, (t_method)readsf_tick);
     x->x_canvas = canvas_getcurrent();
     x->x_multi = multi;
+    x->x_offline = sys_get_offline_processing();
+    x->x_offlinestream = 0;
+    x->x_threadrunning = 0;
     soundfile_clear(&x->x_sf);
     x->x_sf.sf_bytespersample = 2;
     x->x_sf.sf_nchannels = 1;
@@ -2158,7 +2166,9 @@ static void *readsf_new(t_symbol *s, int argc, t_atom *argv)
 #ifdef PDINSTANCE
     x->x_pd_this = pd_this;
 #endif
-    pthread_create(&x->x_childthread, 0, readsf_child_main, x);
+        /* See readsf_start_thread() */
+    if (!x->x_offline)
+        readsf_start_thread(x);
     return x;
 }
 
@@ -2167,77 +2177,167 @@ static void readsf_tick(t_readsf *x)
     outlet_bang(x->x_bangout);
 }
 
-static t_int *readsf_perform(t_int *w)
+    /* We only start the child thread if we detect realtime processing,
+    see readsf_new(), readsf_open() or readsf_dsp().
+    Once we start the thread we keep it running, even if we (temporarily)
+    switch to offline processing. */
+static void readsf_start_thread(t_readsf *x)
 {
-    t_readsf *x = (t_readsf *)(w[1]);
-    int vecsize = x->x_vecsize, nchans = x->x_nchannels, i;
-    size_t j;
-    t_sample *fp;
-    if (x->x_state == STATE_STREAM)
+    if (!x->x_threadrunning)
     {
-        int wantbytes;
-        t_soundfile sf = {0};
-        pthread_mutex_lock(&x->x_mutex);
-            /* copy with mutex locked! */
+        pthread_create(&x->x_childthread, 0, readsf_child_main, x);
+        x->x_threadrunning = 1;
+    }
+}
+
+static void readsf_perform_realtime(t_readsf *x, int vecsize, int nchans)
+{
+    int wantbytes;
+    t_soundfile sf = {0};
+    pthread_mutex_lock(&x->x_mutex);
+        /* copy with mutex locked! */
+    soundfile_copy(&sf, &x->x_sf);
+    wantbytes = vecsize * sf.sf_bytesperframe;
+    while (!x->x_eof && x->x_fifohead >= x->x_fifotail &&
+           x->x_fifohead < x->x_fifotail + wantbytes-1)
+    {
+#ifdef DEBUG_SOUNDFILE_THREADS
+        fprintf(stderr, "readsf~: wait...\n");
+#endif
+        sfread_cond_signal(&x->x_requestcondition);
+        sfread_cond_wait(&x->x_answercondition, &x->x_mutex);
+            /* resync local variables -- bug fix thanks to Shahrokh */
+        vecsize = x->x_vecsize;
         soundfile_copy(&sf, &x->x_sf);
         wantbytes = vecsize * sf.sf_bytesperframe;
-        while (!x->x_eof && x->x_fifohead >= x->x_fifotail &&
-                x->x_fifohead < x->x_fifotail + wantbytes-1)
-        {
 #ifdef DEBUG_SOUNDFILE_THREADS
-            fprintf(stderr, "readsf~: wait...\n");
+        fprintf(stderr, "readsf~: ... done\n");
 #endif
-            sfread_cond_signal(&x->x_requestcondition);
-            sfread_cond_wait(&x->x_answercondition, &x->x_mutex);
-                /* resync local variables -- bug fix thanks to Shahrokh */
-            vecsize = x->x_vecsize;
-            soundfile_copy(&sf, &x->x_sf);
-            wantbytes = vecsize * sf.sf_bytesperframe;
-#ifdef DEBUG_SOUNDFILE_THREADS
-            fprintf(stderr, "readsf~: ... done\n");
-#endif
-        }
-        if (x->x_eof && x->x_fifohead >= x->x_fifotail &&
-            x->x_fifohead < x->x_fifotail + wantbytes-1)
+    }
+    if (x->x_eof && x->x_fifohead >= x->x_fifotail &&
+        x->x_fifohead < x->x_fifotail + wantbytes-1)
+    {
+        int i, j, xfersize;
+        t_sample *fp;
+        if (x->x_fileerror)
+            object_sferror(x, "[readsf~]", x->x_filename,
+                           x->x_fileerror, &x->x_sf);
+            /* if there's a partial buffer left, copy it out */
+        xfersize = (x->x_fifohead - x->x_fifotail + 1) / sf.sf_bytesperframe;
+        if (xfersize)
         {
-            int xfersize;
-            if (x->x_fileerror)
-                object_sferror(x, "[readsf~]", x->x_filename,
-                    x->x_fileerror, &x->x_sf);
-                /* if there's a partial buffer left, copy it out */
-            xfersize = (x->x_fifohead - x->x_fifotail + 1) /
-                       sf.sf_bytesperframe;
-            if (xfersize)
-            {
-                soundfile_xferin_sample(&sf, nchans, x->x_vec, 0,
-                    (unsigned char *)(x->x_buf + x->x_fifotail), xfersize);
-                vecsize -= xfersize;
-            }
-            pthread_mutex_unlock(&x->x_mutex);
-                /* send bang and zero out the (rest of the) output */
-            clock_delay(x->x_clock, 0);
-            x->x_state = STATE_IDLE;
-            for (i = 0; i < nchans; i++)
-                for (j = vecsize, fp = x->x_vec[i] + xfersize; j--;)
-                    *fp++ = 0;
-            return w + 2;
-        }
-
-        soundfile_xferin_sample(&sf, nchans, x->x_vec, 0,
-            (unsigned char *)(x->x_buf + x->x_fifotail), vecsize);
-
-        x->x_fifotail += wantbytes;
-        if (x->x_fifotail >= x->x_fifosize)
-            x->x_fifotail = 0;
-        if ((--x->x_sigcountdown) <= 0)
-        {
-            sfread_cond_signal(&x->x_requestcondition);
-            x->x_sigcountdown = x->x_sigperiod;
+            soundfile_xferin_sample(&sf, nchans, x->x_vec, 0,
+                (unsigned char *)(x->x_buf + x->x_fifotail), xfersize);
+            vecsize -= xfersize;
         }
         pthread_mutex_unlock(&x->x_mutex);
+            /* send bang and zero out the (rest of the) output */
+        clock_delay(x->x_clock, 0);
+        x->x_state = STATE_IDLE;
+        for (i = 0; i < nchans; i++)
+            for (j = vecsize, fp = x->x_vec[i] + xfersize; j--;)
+                *fp++ = 0;
+        return;
+    }
+
+    soundfile_xferin_sample(&sf, nchans, x->x_vec, 0,
+        (unsigned char *)(x->x_buf + x->x_fifotail), vecsize);
+
+    x->x_fifotail += wantbytes;
+    if (x->x_fifotail >= x->x_fifosize)
+        x->x_fifotail = 0;
+    if ((--x->x_sigcountdown) <= 0)
+    {
+        sfread_cond_signal(&x->x_requestcondition);
+        x->x_sigcountdown = x->x_sigperiod;
+    }
+    pthread_mutex_unlock(&x->x_mutex);
+}
+
+static void readsf_perform_offline(t_readsf *x, int vecsize, int nchans)
+{
+    int wantbytes = 0;
+        /* read soundfile to buffer in chunks of at least READSIZE bytes.
+        We need to leave room for at least one byte so we can distinguish
+        between a full and empty buffer. */
+    if (x->x_fifohead >= x->x_fifotail)
+    {
+        if (x->x_fifotail || (x->x_fifosize - x->x_fifohead > READSIZE))
+            wantbytes = x->x_fifosize - x->x_fifohead;
     }
     else
     {
+        if (x->x_fifotail - x->x_fifohead > READSIZE)
+            wantbytes = x->x_fifotail - x->x_fifohead - 1;
+    }
+    if (wantbytes > READSIZE)
+        wantbytes = READSIZE;
+    if (x->x_sf.sf_bytelimit >= 0 && wantbytes > (size_t)x->x_sf.sf_bytelimit)
+        wantbytes = x->x_sf.sf_bytelimit;
+    if (wantbytes > 0)
+    {
+        int bytesread = read(x->x_sf.sf_fd, x->x_buf + x->x_fifohead, wantbytes);
+        if (bytesread > 0)
+        {
+            x->x_fifohead += bytesread;
+            if (x->x_fifohead == x->x_fifosize)
+                x->x_fifohead = 0;
+            x->x_sf.sf_bytelimit -= bytesread;
+            if (x->x_sf.sf_bytelimit <= 0)
+                x->x_eof = 1;
+        }
+        else
+        {
+            object_sferror(x, "[readsf~]", x->x_filename, errno, &x->x_sf);
+            x->x_eof = 1;
+        }
+    }
+        /* write buffer to output */
+    wantbytes = vecsize * x->x_sf.sf_bytesperframe;
+    if (x->x_eof && x->x_fifohead >= x->x_fifotail &&
+        x->x_fifohead < x->x_fifotail + wantbytes-1)
+    {
+            /* if there's a partial buffer left, copy it out */
+        t_sample *fp;
+        int i, j, xfersize;
+        xfersize = (x->x_fifohead - x->x_fifotail + 1) / x->x_sf.sf_bytesperframe;
+        if (xfersize > 0)
+        {
+            soundfile_xferin_sample(&x->x_sf, nchans, x->x_vec, 0,
+                (unsigned char *)(x->x_buf + x->x_fifotail), xfersize);
+            vecsize -= xfersize;
+        }
+            /* send bang and zero out the (rest of the) output */
+        clock_delay(x->x_clock, 0);
+        x->x_state = STATE_IDLE;
+        for (i = 0; i < nchans; i++)
+            for (j = vecsize, fp = x->x_vec[i] + xfersize; j--;)
+                *fp++ = 0;
+        return;
+    }
+
+    soundfile_xferin_sample(&x->x_sf, nchans, x->x_vec, 0,
+        (unsigned char *)(x->x_buf + x->x_fifotail), vecsize);
+    x->x_fifotail += wantbytes;
+    if (x->x_fifotail >= x->x_fifosize)
+        x->x_fifotail = 0;
+}
+
+static t_int *readsf_perform(t_int *w)
+{
+    t_readsf *x = (t_readsf *)(w[1]);
+    int vecsize = x->x_vecsize, nchans = x->x_nchannels;
+    if (x->x_state == STATE_STREAM && x->x_offlinestream == x->x_offline)
+    {
+        if (x->x_offlinestream)
+            readsf_perform_offline(x, vecsize, nchans);
+        else
+            readsf_perform_realtime(x, vecsize, nchans);
+    }
+    else
+    {
+        int i, j;
+        t_sample *fp;
         for (i = 0; i < nchans; i++)
             for (j = vecsize, fp = x->x_vec[i]; j--;)
                 *fp++ = 0;
@@ -2306,6 +2406,12 @@ static void readsf_open(t_readsf *x, t_symbol *s, int argc, t_atom *argv)
     if (!*filesym->s_name)
         return; /* no filename */
 
+        /* We query the process mode at the time of the "open" message
+        to determine whether we use threaded or synchronous I/O.
+        If the process mode changes during the stream, we print a warning,
+        see readsf_dsp(). */
+    x->x_offlinestream = sys_get_offline_processing();
+
     pthread_mutex_lock(&x->x_mutex);
     if (x->x_namelist)
         namelist_free(x->x_namelist), x->x_namelist = 0;
@@ -2323,7 +2429,6 @@ static void readsf_open(t_readsf *x, t_symbol *s, int argc, t_atom *argv)
             close(fd);
     }
     soundfile_clear(&x->x_sf);
-    x->x_requestcode = REQUEST_OPEN;
     x->x_filename = filesym->s_name;
     x->x_fifotail = 0;
     x->x_fifohead = 0;
@@ -2350,8 +2455,40 @@ static void readsf_open(t_readsf *x, t_symbol *s, int argc, t_atom *argv)
     x->x_eof = 0;
     x->x_fileerror = 0;
     x->x_state = STATE_STARTUP;
-    sfread_cond_signal(&x->x_requestcondition);
+    if (x->x_offlinestream)
+    {
+            /* make sure that the child thread has finished reading */
+        while (x->x_requestcode != REQUEST_NOTHING)
+        {
+            sfread_cond_signal(&x->x_requestcondition);
+            sfread_cond_wait(&x->x_answercondition, &x->x_mutex);
+        }
+            /* open soundfile synchronously */
+        const char *filename = x->x_filename;
+        const char *dirname = canvas_getdir(x->x_canvas)->s_name;
+        open_soundfile_via_namelist(dirname, filename, x->x_namelist,
+                                    &x->x_sf, x->x_onsetframes);
+        if (x->x_sf.sf_fd >= 0)
+        {
+            x->x_fifosize = x->x_bufsize - (x->x_bufsize %
+                (x->x_sf.sf_bytesperframe * MAXVECSIZE));
+        }
+        else
+        {
+            object_sferror(x, "[readsf~]", x->x_filename, errno, &x->x_sf);
+            x->x_state = STATE_IDLE;
+        }
+    }
+    else
+    {
+            /* notify child thread */
+        x->x_requestcode = REQUEST_OPEN;
+        sfread_cond_signal(&x->x_requestcondition);
+    }
     pthread_mutex_unlock(&x->x_mutex);
+
+    if (!x->x_offlinestream && !x->x_threadrunning)
+        readsf_start_thread(x);
     return;
 usage:
     pd_error(x, "[readsf~]: usage; open [flags] filename [onset] [headersize]...");
@@ -2383,9 +2520,22 @@ static void readsf_channels(t_readsf *x, t_floatarg f)
 static void readsf_dsp(t_readsf *x, t_signal **sp)
 {
     int i, nchans = x->x_nchannels;
+    int offline = sys_get_offline_processing();
+    if (offline != x->x_offline)
+    {
+        if (!offline && !x->x_threadrunning)
+            readsf_start_thread(x);
+        if (x->x_state != STATE_IDLE && offline != x->x_offlinestream)
+            logpost(x, PD_NORMAL, "readsf~: warning: the processing mode "
+                "has changed after opening the stream");
+        x->x_offline = offline;
+    }
+
     pthread_mutex_lock(&x->x_mutex);
     x->x_vecsize = sp[0]->s_length;
     x->x_sigperiod = x->x_fifosize / (x->x_sf.sf_bytesperframe * x->x_vecsize);
+    pthread_mutex_unlock(&x->x_mutex);
+
     if (x->x_multi) /* multichannel mode */
     {
         signal_setmultiout(&sp[0], nchans);
@@ -2400,7 +2550,6 @@ static void readsf_dsp(t_readsf *x, t_signal **sp)
             x->x_vec[i] = sp[i]->s_vec;
         }
     }
-    pthread_mutex_unlock(&x->x_mutex);
     dsp_add(readsf_perform, 1, x);
 }
 
@@ -2414,22 +2563,24 @@ static void readsf_print(t_readsf *x)
     post("eof %d", x->x_eof);
 }
 
-    /** request QUIT and wait for acknowledge */
 static void readsf_free(t_readsf *x)
 {
-    void *threadrtn;
-    pthread_mutex_lock(&x->x_mutex);
-    x->x_requestcode = REQUEST_QUIT;
-    sfread_cond_signal(&x->x_requestcondition);
-    while (x->x_requestcode != REQUEST_NOTHING)
+    if (x->x_threadrunning)
     {
+            /* request QUIT and wait for acknowledge */
+        void *threadrtn;
+        pthread_mutex_lock(&x->x_mutex);
+        x->x_requestcode = REQUEST_QUIT;
         sfread_cond_signal(&x->x_requestcondition);
-        sfread_cond_wait(&x->x_answercondition, &x->x_mutex);
+        while (x->x_requestcode != REQUEST_NOTHING)
+        {
+            sfread_cond_signal(&x->x_requestcondition);
+            sfread_cond_wait(&x->x_answercondition, &x->x_mutex);
+        }
+        pthread_mutex_unlock(&x->x_mutex);
+        if (pthread_join(x->x_childthread, &threadrtn))
+            pd_error(x, "[readsf~] free: join failed");
     }
-    pthread_mutex_unlock(&x->x_mutex);
-    if (pthread_join(x->x_childthread, &threadrtn))
-        pd_error(x, "[readsf~] free: join failed");
-
     pthread_cond_destroy(&x->x_requestcondition);
     pthread_cond_destroy(&x->x_answercondition);
     pthread_mutex_destroy(&x->x_mutex);
@@ -2585,8 +2736,8 @@ static void *writesf_child_main(void *zz)
                 {
                     writebytes = (x->x_fifohead < x->x_fifotail ?
                         fifosize : x->x_fifohead) - x->x_fifotail;
-                    if (writebytes > READSIZE)
-                        writebytes = READSIZE;
+                    if (writebytes > WRITESIZE)
+                        writebytes = WRITESIZE;
                 }
                 else
                 {
@@ -2711,7 +2862,7 @@ static void *writesf_child_main(void *zz)
 
 /* ----- the object proper runs in the calling (parent) thread ----- */
 
-static void writesf_tick(t_writesf *x);
+static void writesf_start_thread(t_writesf *x);
 
 static void *writesf_new(t_floatarg fnchannels, t_floatarg fbufsize)
 {
@@ -2743,8 +2894,12 @@ static void *writesf_new(t_floatarg fnchannels, t_floatarg fbufsize)
     x->x_vecsize = MAXVECSIZE;
     x->x_insamplerate = 0;
     x->x_state = STATE_IDLE;
+    x->x_requestcode = REQUEST_NOTHING;
     x->x_clock = 0;     /* no callback needed here */
     x->x_canvas = canvas_getcurrent();
+    x->x_offline = sys_get_offline_processing();
+    x->x_offlinestream = 0;
+    x->x_threadrunning = 0;
     soundfile_clear(&x->x_sf);
     x->x_sf.sf_nchannels = nchannels;
     x->x_sf.sf_bytespersample = 2;
@@ -2755,65 +2910,135 @@ static void *writesf_new(t_floatarg fnchannels, t_floatarg fbufsize)
 #ifdef PDINSTANCE
     x->x_pd_this = pd_this;
 #endif
-    pthread_create(&x->x_childthread, 0, writesf_child_main, x);
+        /* See writesf_start_thread(). */
+    if (!x->x_offline)
+        writesf_start_thread(x);
     return x;
+}
+
+    /* We only start the child thread if we detect realtime processing,
+    see writesf_new(), writesf_open() or writesf_dsp().
+    Once we start the thread we keep it running, even if we (temporarily)
+    switch to offline processing. */
+static void writesf_start_thread(t_writesf* x)
+{
+    if (!x->x_threadrunning)
+    {
+        pthread_create(&x->x_childthread, 0, writesf_child_main, x);
+        x->x_threadrunning = 1;
+    }
+}
+
+static void writesf_perform_realtime(t_readsf *x)
+{
+    size_t roominfifo;
+    size_t wantbytes;
+    int vecsize = x->x_vecsize;
+    t_soundfile sf = {0};
+    pthread_mutex_lock(&x->x_mutex);
+        /* copy with mutex locked! */
+    soundfile_copy(&sf, &x->x_sf);
+    wantbytes = vecsize * sf.sf_bytesperframe;
+    roominfifo = x->x_fifotail - x->x_fifohead;
+    if (roominfifo <= 0)
+        roominfifo += x->x_fifosize;
+    while (!x->x_eof && roominfifo < wantbytes + 1)
+    {
+        fprintf(stderr, "writesf waiting for disk write..\n");
+        fprintf(stderr, "(head %d, tail %d, room %d, want %ld)\n",
+                (int)x->x_fifohead, (int)x->x_fifotail,
+                (int)roominfifo, (long)wantbytes);
+        sfread_cond_signal(&x->x_requestcondition);
+        sfread_cond_wait(&x->x_answercondition, &x->x_mutex);
+        fprintf(stderr, "... done waiting.\n");
+        roominfifo = x->x_fifotail - x->x_fifohead;
+        if (roominfifo <= 0)
+            roominfifo += x->x_fifosize;
+    }
+    if (x->x_eof)
+    {
+        if (x->x_fileerror)
+            object_sferror(x, "[writesf~]", x->x_filename,
+                           x->x_fileerror, &x->x_sf);
+        x->x_state = STATE_IDLE;
+        sfread_cond_signal(&x->x_requestcondition);
+        pthread_mutex_unlock(&x->x_mutex);
+        return;
+    }
+
+    soundfile_xferout_sample(&sf, x->x_nchannels, x->x_vec,
+        (unsigned char *)(x->x_buf + x->x_fifohead), vecsize, 0, 1.);
+
+    x->x_fifohead += wantbytes;
+    if (x->x_fifohead >= x->x_fifosize)
+        x->x_fifohead = 0;
+    if ((--x->x_sigcountdown) <= 0)
+    {
+#ifdef DEBUG_SOUNDFILE_THREADS
+        fprintf(stderr, "writesf~: signal 1\n");
+#endif
+        sfread_cond_signal(&x->x_requestcondition);
+        x->x_sigcountdown = x->x_sigperiod;
+    }
+    pthread_mutex_unlock(&x->x_mutex);
+}
+
+static void writesf_flush_buffer(t_readsf *x, int force)
+{
+        /* if the head is < the tail, we can immediately write from tail to
+        end of fifo to disk; otherwise, and if 'force' is false, we hold off
+        writing until there are at least WRITESIZE bytes in the buffer. */
+    while (x->x_fifohead != x->x_fifotail)
+    {
+        int writebytes, byteswritten;
+        if (x->x_fifohead < x->x_fifotail)
+            writebytes = x->x_fifosize - x->x_fifotail;
+        else
+        {
+            writebytes = x->x_fifohead - x->x_fifotail;
+            if (writebytes < WRITESIZE && !force)
+                return;
+        }
+        byteswritten = write(x->x_sf.sf_fd, x->x_buf + x->x_fifotail, writebytes);
+        if (byteswritten < 0 || byteswritten < writebytes)
+        {
+            object_sferror(x, "[writesf~]", x->x_filename, errno, &x->x_sf);
+            x->x_state = STATE_IDLE;
+            sys_close(x->x_sf.sf_fd);
+            x->x_sf.sf_fd = -1;
+            return;
+        }
+        x->x_fifotail += byteswritten;
+        if (x->x_fifotail == x->x_fifosize)
+            x->x_fifotail = 0;
+        x->x_frameswritten += byteswritten / x->x_sf.sf_bytesperframe;
+    }
+}
+
+static void writesf_perform_offline(t_readsf *x)
+{
+    int vecsize = x->x_vecsize;
+    size_t wantbytes = vecsize * x->x_sf.sf_bytesperframe;
+
+    soundfile_xferout_sample(&x->x_sf, x->x_nchannels, x->x_vec,
+        (unsigned char *)(x->x_buf + x->x_fifohead), vecsize, 0, 1.);
+
+    x->x_fifohead += wantbytes;
+    if (x->x_fifohead >= x->x_fifosize)
+        x->x_fifohead = 0;
+
+    writesf_flush_buffer(x, 0);
 }
 
 static t_int *writesf_perform(t_int *w)
 {
     t_writesf *x = (t_writesf *)(w[1]);
-    if (x->x_state == STATE_STREAM)
+    if (x->x_state == STATE_STREAM && x->x_offlinestream == x->x_offline)
     {
-        size_t roominfifo;
-        size_t wantbytes;
-        int vecsize = x->x_vecsize;
-        t_soundfile sf = {0};
-        pthread_mutex_lock(&x->x_mutex);
-            /* copy with mutex locked! */
-        soundfile_copy(&sf, &x->x_sf);
-        wantbytes = vecsize * sf.sf_bytesperframe;
-        roominfifo = x->x_fifotail - x->x_fifohead;
-        if (roominfifo <= 0)
-            roominfifo += x->x_fifosize;
-        while (!x->x_eof && roominfifo < wantbytes + 1)
-        {
-            fprintf(stderr, "writesf waiting for disk write..\n");
-            fprintf(stderr, "(head %d, tail %d, room %d, want %ld)\n",
-                (int)x->x_fifohead, (int)x->x_fifotail,
-                (int)roominfifo, (long)wantbytes);
-            sfread_cond_signal(&x->x_requestcondition);
-            sfread_cond_wait(&x->x_answercondition, &x->x_mutex);
-            fprintf(stderr, "... done waiting.\n");
-            roominfifo = x->x_fifotail - x->x_fifohead;
-            if (roominfifo <= 0)
-                roominfifo += x->x_fifosize;
-        }
-        if (x->x_eof)
-        {
-            if (x->x_fileerror)
-                object_sferror(x, "[writesf~]", x->x_filename,
-                    x->x_fileerror, &x->x_sf);
-            x->x_state = STATE_IDLE;
-            sfread_cond_signal(&x->x_requestcondition);
-            pthread_mutex_unlock(&x->x_mutex);
-            return w + 2;
-        }
-
-        soundfile_xferout_sample(&sf, x->x_nchannels, x->x_vec,
-            (unsigned char *)(x->x_buf + x->x_fifohead), vecsize, 0, 1.);
-
-        x->x_fifohead += wantbytes;
-        if (x->x_fifohead >= x->x_fifosize)
-            x->x_fifohead = 0;
-        if ((--x->x_sigcountdown) <= 0)
-        {
-#ifdef DEBUG_SOUNDFILE_THREADS
-            fprintf(stderr, "writesf~: signal 1\n");
-#endif
-            sfread_cond_signal(&x->x_requestcondition);
-            x->x_sigcountdown = x->x_sigperiod;
-        }
-        pthread_mutex_unlock(&x->x_mutex);
+        if (x->x_offlinestream)
+            writesf_perform_offline(x);
+        else
+            writesf_perform_realtime(x);
     }
     return w + 2;
 }
@@ -2831,23 +3056,29 @@ static void writesf_start(t_writesf *x)
     /** LATER rethink whether you need the mutex just to set a variable? */
 static void writesf_stop(t_writesf *x)
 {
-    pthread_mutex_lock(&x->x_mutex);
-    x->x_state = STATE_IDLE;
-    x->x_requestcode = REQUEST_CLOSE;
-#ifdef DEBUG_SOUNDFILE_THREADS
-    fprintf(stderr, "writesf~: signal 2\n");
-#endif
-    sfread_cond_signal(&x->x_requestcondition);
-    if (sys_batch)
+    if (x->x_offlinestream)
     {
-            /* if we're running batch, wait for child to finish */
-        while (x->x_requestcode != REQUEST_NOTHING)
+        if (x->x_state != STATE_IDLE)
         {
-            sfread_cond_signal(&x->x_requestcondition);
-            sfread_cond_wait(&x->x_answercondition, &x->x_mutex);
+                /* write remaining buffer content */
+            writesf_flush_buffer(x, 1);
+            soundfile_finishwrite(x, x->x_filename, &x->x_sf,
+                SFMAXFRAMES, x->x_frameswritten);
+            sys_close(x->x_sf.sf_fd);
+            x->x_sf.sf_fd = -1;
         }
     }
-    pthread_mutex_unlock(&x->x_mutex);
+    else
+    {
+        pthread_mutex_lock(&x->x_mutex);
+        x->x_requestcode = REQUEST_CLOSE;
+    #ifdef DEBUG_SOUNDFILE_THREADS
+        fprintf(stderr, "writesf~: signal 2\n");
+    #endif
+        sfread_cond_signal(&x->x_requestcondition);
+        pthread_mutex_unlock(&x->x_mutex);
+    }
+    x->x_state = STATE_IDLE;
 }
 
     /** open method.  Called as: open [flags] filename with args as in
@@ -2857,6 +3088,7 @@ static void writesf_open(t_writesf *x, t_symbol *s, int argc, t_atom *argv)
     t_soundfiler_writeargs wa = {0};
     if (x->x_state != STATE_IDLE)
         writesf_stop(x);
+
     if (soundfiler_parsewriteargs(x, &argc, &argv, &wa) || wa.wa_ascii)
     {
         pd_error(x, "[writesf~]: usage; open [flags] filename...");
@@ -2867,6 +3099,12 @@ static void writesf_open(t_writesf *x, t_symbol *s, int argc, t_atom *argv)
         pd_error(x, "[writesf~] open: normalize/onset/nframes argument ignored");
     if (argc)
         pd_error(x, "[writesf~] open: extra argument(s) ignored");
+        /* We query the process mode at the time of the "open" message
+        to determine whether we use threaded or synchronous I/O. If the
+        process mode changes during the stream, we print a warning,
+        see writesf_dsp(). */
+    x->x_offlinestream = sys_get_offline_processing();
+
     pthread_mutex_lock(&x->x_mutex);
         /* make sure that the child thread has finished writing */
     while (x->x_requestcode != REQUEST_NOTHING)
@@ -2887,7 +3125,6 @@ static void writesf_open(t_writesf *x, t_symbol *s, int argc, t_atom *argv)
     x->x_sf.sf_bigendian = wa.wa_bigendian;
     x->x_sf.sf_bytesperframe = x->x_sf.sf_nchannels * x->x_sf.sf_bytespersample;
     x->x_frameswritten = 0;
-    x->x_requestcode = REQUEST_OPEN;
     x->x_fifotail = 0;
     x->x_fifohead = 0;
     x->x_eof = 0;
@@ -2898,18 +3135,51 @@ static void writesf_open(t_writesf *x, t_symbol *s, int argc, t_atom *argv)
         tick.  */
     x->x_fifosize = x->x_bufsize - (x->x_bufsize %
         (x->x_sf.sf_bytesperframe * MAXVECSIZE));
-        /* arrange for the "request" condition to be signaled 16
+    if (x->x_offlinestream)
+    {
+            /* create the soundfile synchronously */
+        create_soundfile(x->x_canvas, x->x_filename, &x->x_sf, 0);
+        if (x->x_sf.sf_fd >= 0)
+        {
+            x->x_fifosize = x->x_bufsize - (x->x_bufsize %
+                (x->x_sf.sf_bytesperframe * MAXVECSIZE));
+        }
+        else
+        {
+            object_sferror(x, "[writesf~]", x->x_filename, errno, &x->x_sf);
+            x->x_state = STATE_IDLE;
+        }
+    }
+    else
+    {
+            /* arrange for the "request" condition to be signaled 16
             times per buffer */
-    x->x_sigcountdown = x->x_sigperiod = (x->x_fifosize /
-            (16 * (x->x_sf.sf_bytesperframe * x->x_vecsize)));
-    sfread_cond_signal(&x->x_requestcondition);
+        x->x_requestcode = REQUEST_OPEN;
+        x->x_sigcountdown = x->x_sigperiod = (x->x_fifosize /
+                (16 * (x->x_sf.sf_bytesperframe * x->x_vecsize)));
+        sfread_cond_signal(&x->x_requestcondition);
+    }
     pthread_mutex_unlock(&x->x_mutex);
+
+    if (!x->x_offlinestream && !x->x_threadrunning)
+        writesf_start_thread(x);
 }
 
 static void writesf_dsp(t_writesf *x, t_signal **sp)
 {
     int i, j, nchans, ninlets = x->x_ninlets;
     t_sample **vp = x->x_vec;
+    int offline = sys_get_offline_processing();
+    if (offline != x->x_offline)
+    {
+        if (!offline && !x->x_threadrunning)
+            writesf_start_thread(x);
+        if (x->x_state != STATE_IDLE && offline != x->x_offlinestream)
+            logpost(x, PD_NORMAL, "writesf~: warning: the processing mode "
+                 "has changed after opening the stream");
+        x->x_offline = offline;
+    }
+
     pthread_mutex_lock(&x->x_mutex);
     x->x_vecsize = sp[0]->s_n;
     x->x_sigperiod = (x->x_fifosize /
@@ -2926,6 +3196,7 @@ static void writesf_dsp(t_writesf *x, t_signal **sp)
     x->x_nchannels = nchans;
     x->x_insamplerate = sp[0]->s_sr;
     pthread_mutex_unlock(&x->x_mutex);
+
     dsp_add(writesf_perform, 1, x);
 }
 
@@ -2939,31 +3210,36 @@ static void writesf_print(t_writesf *x)
     post("eof %d", x->x_eof);
 }
 
-    /** request QUIT and wait for acknowledge */
 static void writesf_free(t_writesf *x)
 {
-    void *threadrtn;
-    pthread_mutex_lock(&x->x_mutex);
-    x->x_requestcode = REQUEST_QUIT;
-#ifdef DEBUG_SOUNDFILE_THREADS
-    fprintf(stderr, "writesf~: stopping thread...\n");
-#endif
-    sfread_cond_signal(&x->x_requestcondition);
-    while (x->x_requestcode != REQUEST_NOTHING)
-    {
-#ifdef DEBUG_SOUNDFILE_THREADS
-        fprintf(stderr, "writesf~: signaling...\n");
-#endif
-        sfread_cond_signal(&x->x_requestcondition);
-        sfread_cond_wait(&x->x_answercondition, &x->x_mutex);
-    }
-    pthread_mutex_unlock(&x->x_mutex);
-    if (pthread_join(x->x_childthread, &threadrtn))
-        pd_error(x, "[writesf~] free: join failed");
-#ifdef DEBUG_SOUNDFILE_THREADS
-    fprintf(stderr, "writesf~: ... done\n");
-#endif
+    if (x->x_offlinestream && x->x_state != STATE_IDLE)
+        writesf_stop(x);
 
+    if (x->x_threadrunning)
+    {
+            /* request QUIT and wait for acknowledge */
+        void *threadrtn;
+        pthread_mutex_lock(&x->x_mutex);
+        x->x_requestcode = REQUEST_QUIT;
+    #ifdef DEBUG_SOUNDFILE_THREADS
+        fprintf(stderr, "writesf~: stopping thread...\n");
+    #endif
+        sfread_cond_signal(&x->x_requestcondition);
+        while (x->x_requestcode != REQUEST_NOTHING)
+        {
+    #ifdef DEBUG_SOUNDFILE_THREADS
+            fprintf(stderr, "writesf~: signaling...\n");
+    #endif
+            sfread_cond_signal(&x->x_requestcondition);
+            sfread_cond_wait(&x->x_answercondition, &x->x_mutex);
+        }
+        pthread_mutex_unlock(&x->x_mutex);
+        if (pthread_join(x->x_childthread, &threadrtn))
+            pd_error(x, "[writesf~] free: join failed");
+    #ifdef DEBUG_SOUNDFILE_THREADS
+        fprintf(stderr, "writesf~: ... done\n");
+    #endif
+    }
     pthread_cond_destroy(&x->x_requestcondition);
     pthread_cond_destroy(&x->x_answercondition);
     pthread_mutex_destroy(&x->x_mutex);
