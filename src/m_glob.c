@@ -42,6 +42,7 @@ void glob_savepreferences(t_pd *dummy, t_symbol *s);
 void glob_forgetpreferences(t_pd *dummy);
 void glob_open(t_pd *ignore, t_symbol *name, t_symbol *dir, t_floatarg f);
 void glob_fastforward(t_pd *ignore, t_floatarg f);
+void glob_offline_processing(t_pd *ignore, t_floatarg f);
 void glob_settracing(void *dummy, t_floatarg f);
 void glob_vis(void *dummy, t_symbol *s);
 void glob_closesubs(void *dummy);
@@ -199,6 +200,8 @@ void glob_init(void)
         gensym("help-intro"), A_GIMME, 0);
     class_addmethod(glob_pdobject, (t_method)glob_fastforward,
          gensym("fast-forward"), A_FLOAT, 0);
+    class_addmethod(glob_pdobject, (t_method)glob_offline_processing,
+         gensym("offline-processing"), A_FLOAT, 0);
     class_addmethod(glob_pdobject, (t_method)glob_settracing,
          gensym("set-tracing"), A_FLOAT, 0);
     class_addmethod(glob_pdobject, (t_method)glob_watchdog,

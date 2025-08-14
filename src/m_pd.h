@@ -749,6 +749,8 @@ EXTERN int sys_getblksize(void);
 EXTERN t_float sys_getsr(void);
 EXTERN int sys_get_inchannels(void);
 EXTERN int sys_get_outchannels(void);
+EXTERN void sys_set_offline_processing(int offline);
+EXTERN int sys_get_offline_processing(void);
 
 EXTERN void dsp_add(t_perfroutine f, int n, ...);
 EXTERN void dsp_addv(t_perfroutine f, int n, t_int *vec);

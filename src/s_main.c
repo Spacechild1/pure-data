@@ -427,7 +427,10 @@ int sys_main(int argc, const char **argv)
         sys_listdevs();
     sys_init_midi();
     sys_init_audio();
-         /* load dynamic libraries specified with "-lib" args */
+        /* set processing mode before opening patches */
+    if (sys_batch)
+        sys_set_offline_processing(1);
+        /* load dynamic libraries specified with "-lib" args */
     if (sys_oktoloadfiles(0) || noprefs)
     {
         for  (nl = STUFF->st_externlist; nl; nl = nl->nl_next)

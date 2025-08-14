@@ -569,6 +569,25 @@ int sys_get_inchannels(void)
      return (STUFF->st_inchannels);
 }
 
+void sys_set_offline_processing(int offline)
+{
+    if (offline != STUFF->st_offline)
+    {
+        STUFF->st_offline = offline;
+        canvas_update_dsp();
+    }
+}
+
+int sys_get_offline_processing(void)
+{
+    return (STUFF->st_offline);
+}
+
+void glob_offline_processing(t_pd *ignore, t_floatarg f)
+{
+    sys_set_offline_processing(f != 0);
+}
+
 /* this could later be set by a preference but for now it seems OK to just
 keep jack audio open but close unused audio devices for any other API */
 int audio_shouldkeepopen(void)

@@ -61,6 +61,7 @@ void s_stuff_newpdinstance(void)
     STUFF->st_dacsr = DEFDACSAMPLERATE;
     STUFF->st_printhook = sys_printhook;
     STUFF->st_impdata = NULL;
+    STUFF->st_offline = 0;
 }
 
 void s_stuff_freepdinstance(void)
