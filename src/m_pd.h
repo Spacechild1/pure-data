@@ -1010,6 +1010,10 @@ EXTERN_STRUCT _instanceugen;
 EXTERN_STRUCT _instancestuff;
 #define t_instancestuff struct _instancestuff
 
+/* If PDTHREADS is set to 0, sys_lock() and sys_unlock() become no-ops.
+This is only safe if all Pd instances are accessed from a single thread!
+As soon as Pd instances run on different threads, we need to protect
+internal global data structures from concurrent access. */
 #ifndef PDTHREADS
 #define PDTHREADS 1
 #endif
